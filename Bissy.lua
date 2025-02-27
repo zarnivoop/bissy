@@ -54,12 +54,10 @@ addon.primaryBtn:SetSize(80, 22)
 addon.primaryBtn:SetPoint("TOP", 0, -35)
 addon.primaryBtn:SetPoint("RIGHT", Bissy, "CENTER", -2, 0)
 addon.primaryBtn:SetScript("OnClick", function()
-    print("Bissy: Primary button clicked")
     addon.currentSet = "primary"
     
     -- Update the display if we have data
     if addon.db.primary then
-        print("Bissy: Found primary data with " .. #(addon.db.primary.items or {}) .. " items")
         -- Clear all slots first
         addon:ClearAllSlots()
         
@@ -112,12 +110,10 @@ addon.secondaryBtn:SetSize(80, 22)
 addon.secondaryBtn:SetPoint("TOP", 0, -35)
 addon.secondaryBtn:SetPoint("LEFT", Bissy, "CENTER", 2, 0)
 addon.secondaryBtn:SetScript("OnClick", function()
-    print("Bissy: Secondary button clicked")
     addon.currentSet = "secondary"
     
     -- Update the display if we have data
     if addon.db.secondary then
-        print("Bissy: Found secondary data with " .. #(addon.db.secondary.items or {}) .. " items")
         -- Clear all slots first
         addon:ClearAllSlots()
         
@@ -165,15 +161,17 @@ end)
 
 -- Function to update button states based on current set
 function addon:UpdateButtonStates()
-    print("Bissy: Updating button states, current set: " .. addon.currentSet)
+    print(addon.currentSet)
+
+    -- Disable both buttons by default
+    addon.primaryBtn:SetEnabled(false)
+    addon.secondaryBtn:SetEnabled(false)
+    
+    -- Enable the appropriate buttons
     if addon.currentSet == "primary" then
-        print("Bissy: Setting primary button disabled, secondary button enabled")
-        addon.primaryBtn:Disable()
-        addon.secondaryBtn:Enable()
+        addon.secondaryBtn:SetEnabled(true)
     else
-        print("Bissy: Setting primary button enabled, secondary button disabled")
-        addon.primaryBtn:Enable()
-        addon.secondaryBtn:Disable()
+        addon.primaryBtn:SetEnabled(true)
     end
 end
 
@@ -336,11 +334,8 @@ Bissy:SetScript("OnShow", function(self)
         originalOnShow(self)
     end
     
-    print("Bissy: Frame shown, current set: " .. addon.currentSet)
-    
     -- Restore imported data for current set
     if addon.currentSet == "primary" and addon.db.primary then
-        print("Bissy: Restoring primary character set")
         -- Clear all slots first
         addon:ClearAllSlots()
         
@@ -375,7 +370,6 @@ Bissy:SetScript("OnShow", function(self)
         -- Update the character model
         addon.UpdateCharacterModel()
     elseif addon.currentSet == "secondary" and addon.db.secondary then
-        print("Bissy: Restoring secondary character set")
         -- Clear all slots first
         addon:ClearAllSlots()
         
@@ -522,15 +516,10 @@ function addon:ShowImportDialog()
         importBtn:SetPoint("BOTTOMRIGHT", testBtn, "BOTTOMLEFT", -5, 0)
         importBtn:SetScript("OnClick", function()
             local jsonStr = dialog.editBox:GetText()
-            
             if not jsonStr or jsonStr == "" then
-                print("Bissy: No data to import")
                 return
             end
             
-            print("Bissy: Starting import process...")
-            
-            -- Use a very simple approach for testing
             local data = {
                 name = "Imported Character",
                 items = {}
@@ -545,7 +534,6 @@ function addon:ShowImportDialog()
             -- Extract items with a simpler approach
             local itemPattern = '{"id":%s*(%d+)%s*,%s*"name":%s*"([^"]+)"%s*,%s*"slot":%s*"([^"]+)"}'
             for id, name, slot in string.gmatch(jsonStr, itemPattern) do
-                print(string.format("Found item: %s (ID: %s, Slot: %s)", name, id, slot))
                 -- Check if the slot is valid
                 if addon.SLOT_MAP[slot] then
                     table.insert(data.items, {
@@ -553,17 +541,12 @@ function addon:ShowImportDialog()
                         name = name,
                         slot = slot
                     })
-                    print("Bissy: Added item: " .. name)
-                else
-                    print("Bissy: Unknown slot: " .. slot)
                 end
             end
             
             -- If no items found with the first pattern, try a more flexible one
             if #data.items == 0 then
-                print("Bissy: Trying alternative pattern...")
                 for id, name, slot in string.gmatch(jsonStr, '"id"%s*:%s*(%d+).-"name"%s*:%s*"([^"]+)".-"slot"%s*:%s*"([^"]+)"') do
-                    print(string.format("Found item: %s (ID: %s, Slot: %s)", name, id, slot))
                     -- Check if the slot is valid
                     if addon.SLOT_MAP[slot] then
                         table.insert(data.items, {
@@ -571,27 +554,17 @@ function addon:ShowImportDialog()
                             name = name,
                             slot = slot
                         })
-                        print("Bissy: Added item: " .. name)
-                    else
-                        print("Bissy: Unknown slot: " .. slot)
                     end
                 end
             end
             
             -- If still no items found, try a very direct approach
             if #data.items == 0 then
-                print("Bissy: Trying direct approach...")
-                -- Print the first 100 characters of the JSON to debug
-                print("JSON preview: " .. string.sub(jsonStr, 1, 100))
-                
                 -- Try to find the items section
                 local itemsSection = jsonStr:match('"items"%s*:%s*%[(.-)%]')
                 if itemsSection then
-                    print("Found items section, length: " .. #itemsSection)
-                    
                     -- Try a very simple pattern that just looks for IDs and slots
                     for id, slot in string.gmatch(itemsSection, '"id"%s*:%s*(%d+).-"slot"%s*:%s*"([^"]+)"') do
-                        print(string.format("Found item ID: %s, Slot: %s", id, slot))
                         -- Check if the slot is valid
                         if addon.SLOT_MAP[slot] then
                             table.insert(data.items, {
@@ -599,26 +572,15 @@ function addon:ShowImportDialog()
                                 name = "Item " .. id,  -- Use a placeholder name
                                 slot = slot
                             })
-                            print("Bissy: Added item ID: " .. id)
-                        else
-                            print("Bissy: Unknown slot: " .. slot)
                         end
                     end
-                else
-                    print("Bissy: Could not find items section")
                 end
             end
             
-            -- Debug output
-            print("Bissy: Found " .. #data.items .. " items")
-            
             -- Process the data
             if #data.items > 0 then
-                print("Bissy: Import successful!")
                 addon:ProcessImportedData(data)
                 dialog:Hide()
-            else
-                print("Bissy: No items found in import data")
             end
         end)
         
@@ -680,7 +642,6 @@ end)
 
 -- Function to update the frame title based on the current set
 function addon:UpdateFrameTitle()
-    print("Bissy: Updating frame title, current set: " .. addon.currentSet)
     if addon.currentSet == "primary" then
         Bissy:SetTitle("Bissy (Primary)")
     else
@@ -690,13 +651,9 @@ end
 
 -- Process imported data
 function addon:ProcessImportedData(data)
-    print("Bissy: Processing imported data for set: " .. addon.currentSet)
-    
     -- Save the data to the current set
     if addon.currentSet == "primary" then
         addon.db.primary = data
-        print("Bissy: Saved to primary set")
-        
         -- Update primary items array for tooltip integration
         addon.primaryItems = {}
         for _, item in ipairs(data.items) do
@@ -704,8 +661,6 @@ function addon:ProcessImportedData(data)
         end
     elseif addon.currentSet == "secondary" then
         addon.db.secondary = data
-        print("Bissy: Saved to secondary set")
-        
         -- Update secondary items array for tooltip integration
         addon.secondaryItems = {}
         for _, item in ipairs(data.items) do
@@ -713,14 +668,8 @@ function addon:ProcessImportedData(data)
         end
     end
     
-    -- Don't show the frame automatically
-    -- if not Bissy:IsShown() then
-    --     Bissy:Show()
-    -- end
-    
     -- Check if we have items
     if not data.items then
-        addon:Debug("No items found in import data")
         return
     end
     
@@ -732,12 +681,12 @@ function addon:ProcessImportedData(data)
         -- Map JSON slot name to WoW slot ID
         local slotName = addon.SLOT_MAP[item.slot]
         if not slotName then
-            addon:Debug("Unknown slot:", (item.slot or "nil"))
+            -- Skip unknown slots
         else
             -- Get the slot
             local slot = addon.slots[slotName]
             if not slot then
-                addon:Debug("Slot not found:", slotName)
+                -- Skip missing slots
             else
                 -- Get item info
                 local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
@@ -752,11 +701,6 @@ function addon:ProcessImportedData(data)
                         itemLink = "item:" .. item.id .. ":0:0:0:0:0:0:0"
                         itemName = name
                         itemTexture = texture
-                        -- Request item info to cache it for later
-                        addon:Debug("Requesting item info for:", name)
-                    else
-                        addon:Debug("Item not found:", (item.id or "nil"))
-                        -- Skip this item and continue with the next one
                     end
                 end
                 
@@ -773,8 +717,6 @@ function addon:ProcessImportedData(data)
                         slot.IconBorder:SetVertexColor(r, g, b)
                         slot.IconBorder:Show()
                     end
-                    
-                    addon:Debug("Set item:", itemName, "in slot:", slotName)
                 end
             end
         end
@@ -788,162 +730,6 @@ function addon:ProcessImportedData(data)
     
     -- Update button states
     addon:UpdateButtonStates()
-    
-    print("Bissy: Finished processing imported data")
-end
-
--- Test JSON parsing
-function addon:TestJSONParse(jsonStr)
-    if not jsonStr or jsonStr == "" then
-        return false, "Empty JSON string"
-    end
-    
-    -- Debug output
-    print("Bissy: Parsing JSON string of length: " .. #jsonStr)
-    print("Bissy: First 100 chars: " .. jsonStr:sub(1, 100))
-    
-    -- Try to use the JSON library
-    if addon.json then
-        local success, result
-        
-        -- Use the parse function
-        success, result = pcall(function()
-            return addon.json.parse(jsonStr)
-        end)
-        
-        if success and result then
-            -- Fix for null values in the JSON library
-            if result.items == addon.json.null then
-                result.items = {}
-            end
-            
-            -- Ensure items is a table
-            if not result.items then
-                result.items = {}
-            end
-            
-            return true, result
-        else
-            print("Bissy: JSON parse error: " .. tostring(result))
-        end
-    end
-    
-    -- If we get here, either there's no JSON library or parsing failed
-    print("Bissy: Falling back to built-in parser")
-    
-    -- Create a basic result
-    local result = {}
-    
-    -- Extract character name
-    result.name = jsonStr:match('"name"%s*:%s*"([^"]+)"')
-    if not result.name then
-        result.name = "Imported Character"
-    end
-    
-    -- Extract items
-    result.items = {}
-    
-    -- Try to find the items section
-    local itemsSection = jsonStr:match('"items"%s*:%s*%[(.-)%]')
-    if itemsSection then
-        print("Bissy: Found items section, length: " .. #itemsSection)
-        
-        -- Use a more robust approach to extract items
-        local startPos = 1
-        while startPos <= #itemsSection do
-            -- Find the start of an item object
-            local itemStart = itemsSection:find("{", startPos)
-            if not itemStart then break end
-            
-            -- Find the matching end bracket
-            local depth = 1
-            local itemEnd = itemStart
-            while depth > 0 and itemEnd < #itemsSection do
-                itemEnd = itemEnd + 1
-                local char = itemsSection:sub(itemEnd, itemEnd)
-                if char == "{" then
-                    depth = depth + 1
-                elseif char == "}" then
-                    depth = depth - 1
-                end
-            end
-            
-            if depth == 0 then
-                -- Extract the complete item object
-                local itemStr = itemsSection:sub(itemStart, itemEnd)
-                print("Bissy: Found item: " .. itemStr)
-                
-                -- Extract item properties
-                local id = itemStr:match('"id"%s*:%s*(%d+)')
-                local name = itemStr:match('"name"%s*:%s*"([^"]+)"')
-                local slot = itemStr:match('"slot"%s*:%s*"([^"]+)"')
-                
-                print("Bissy: Extracted - ID: " .. (id or "nil") .. 
-                      ", Name: " .. (name or "nil") .. 
-                      ", Slot: " .. (slot or "nil"))
-                
-                if id and name and slot then
-                    table.insert(result.items, {
-                        id = tonumber(id),
-                        name = name,
-                        slot = slot
-                    })
-                    print("Bissy: Added item: " .. name)
-                end
-                
-                startPos = itemEnd + 1
-            else
-                -- Unmatched brackets, something went wrong
-                print("Bissy: Error parsing item - unmatched brackets")
-                break
-            end
-        end
-    else
-        -- Fallback to more basic pattern matching
-        for id, name, slot in jsonStr:gmatch('"id"%s*:%s*(%d+)[^}]*"name"%s*:%s*"([^"]+)"[^}]*"slot"%s*:%s*"([^"]+)"') do
-            table.insert(result.items, {
-                id = tonumber(id),
-                name = name,
-                slot = slot
-            })
-        end
-    end
-    
-    if #result.items > 0 then
-        return true, result
-    else
-        return false, "No items found in import data"
-    end
-end
-
--- Test JSON parsing with a hardcoded example
-function addon:TestDirectParse()
-    local testJson = [[
-{
-  "name": "Test Character",
-  "items": [
-    {"id": 12345, "name": "Test Head Item", "slot": "HEAD"},
-    {"id": 12346, "name": "Test Neck Item", "slot": "NECK"},
-    {"id": 12347, "name": "Test Shoulder Item", "slot": "SHOULDER"}
-  ]
-}
-]]
-    print("Bissy: Running direct parse test")
-    local success, result = addon:TestJSONParse(testJson)
-    if success then
-        print("Bissy: Direct parse test successful!")
-        print("Character name: " .. (result.name or "Unknown"))
-        print("Items: " .. (result.items and #result.items or 0))
-        
-        if result.items and #result.items > 0 then
-            for i, item in ipairs(result.items) do
-                print(string.format("Item %d: %s (ID: %d, Slot: %s)", 
-                    i, item.name, item.id, item.slot))
-            end
-        end
-    else
-        print("Bissy: Direct parse test failed: " .. tostring(result))
-    end
 end
 
 -- Function to initialize the addon
