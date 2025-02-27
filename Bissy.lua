@@ -21,62 +21,186 @@ function addon:Debug(...)
     end
 end
 
--- Initialize JSON module if not available globally
-if not json then
-    json = {}
-end
+-- Create main frame
+local Bissy = CreateFrame("Frame", "Bissy", UIParent, "PortraitFrameTemplate")
+Bissy:Hide()
+Bissy:SetSize(370, 500)
+Bissy:SetPoint("CENTER")
+Bissy:SetMovable(true)
+Bissy:EnableMouse(true)
+Bissy:RegisterForDrag("LeftButton")
+Bissy:SetScript("OnDragStart", Bissy.StartMoving)
+Bissy:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    
+    -- Save position
+    local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint()
+    addon.db.position = {
+        point = point,
+        relativeTo = relativeTo and relativeTo:GetName() or nil,
+        relativePoint = relativePoint,
+        x = xOfs,
+        y = yOfs
+    }
+end)
+Bissy:SetClampedToScreen(true)
+Bissy:SetTitle("Bissy (Primary)")
 
--- Check if JSON module is loaded
-if not addon.json then
-    addon.json = json
-end
-
--- Function to load JSON module
-local function LoadJSONModule()
-    -- First check if we already have a working JSON module
-    if addon.json and addon.json.decode then
-        return true
-    end
+-- Add set switcher buttons
+-- Primary button
+addon.primaryBtn = CreateFrame("Button", nil, Bissy, "UIPanelButtonTemplate")
+addon.primaryBtn:SetText("Primary")
+addon.primaryBtn:SetSize(80, 22)
+addon.primaryBtn:SetPoint("TOP", 0, -35)
+addon.primaryBtn:SetPoint("RIGHT", Bissy, "CENTER", -2, 0)
+addon.primaryBtn:SetScript("OnClick", function()
+    print("Bissy: Primary button clicked")
+    addon.currentSet = "primary"
     
-    -- Try to use the global json module if available
-    if json and json.decode then
-        addon.json = json
-        return true
-    end
-    
-    -- If we get here, we need to create our own json module
-    addon.json = addon.json or {}
-    
-    -- Create a simple decode function if needed
-    if not addon.json.decode then
-        addon.json.decode = function(str)
-            -- Very basic JSON parser for simple structures
-            if DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage("Bissy: Using built-in JSON parser", 1, 0.7, 0)
+    -- Update the display if we have data
+    if addon.db.primary then
+        print("Bissy: Found primary data with " .. #(addon.db.primary.items or {}) .. " items")
+        -- Clear all slots first
+        addon:ClearAllSlots()
+        
+        -- Process each item
+        for _, item in ipairs(addon.db.primary.items or {}) do
+            -- Map JSON slot name to WoW slot ID
+            local slotName = addon.SLOT_MAP[item.slot]
+            if slotName then
+                -- Get the slot
+                local slot = addon.slots[slotName]
+                if slot then
+                    -- Get item info
+                    local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
+                          itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
+                    
+                    if itemLink then
+                        slot.itemLink = itemLink
+                        slot.icon:SetTexture(itemTexture)
+                        slot.icon:Show()
+                        
+                        -- Set border color based on item quality
+                        if itemRarity > 1 then
+                            local r, g, b = GetItemQualityColor(itemRarity)
+                            slot.IconBorder:SetVertexColor(r, g, b)
+                            slot.IconBorder:Show()
+                        end
+                    end
+                end
             end
-            
-            -- Try to parse with a simple approach
-            local success, data = pcall(function()
-                return loadstring("return " .. str:gsub("([%w_]+):", "[%1]="):gsub("%[%s*([%w_\"\']+)%s*%]", "[%1]"))()
-            end)
-            
-            if success and data then
-                return data
-            end
-            
-            error("Failed to parse JSON")
         end
+        
+        -- Update the character model
+        addon.UpdateCharacterModel()
+    else
+        -- Clear the display if no data
+        addon:ClearAllSlots()
     end
     
-    return true
+    -- Update the frame title
+    addon:UpdateFrameTitle()
+    
+    -- Update button states
+    addon:UpdateButtonStates()
+end)
+
+-- Secondary button
+addon.secondaryBtn = CreateFrame("Button", nil, Bissy, "UIPanelButtonTemplate")
+addon.secondaryBtn:SetText("Secondary")
+addon.secondaryBtn:SetSize(80, 22)
+addon.secondaryBtn:SetPoint("TOP", 0, -35)
+addon.secondaryBtn:SetPoint("LEFT", Bissy, "CENTER", 2, 0)
+addon.secondaryBtn:SetScript("OnClick", function()
+    print("Bissy: Secondary button clicked")
+    addon.currentSet = "secondary"
+    
+    -- Update the display if we have data
+    if addon.db.secondary then
+        print("Bissy: Found secondary data with " .. #(addon.db.secondary.items or {}) .. " items")
+        -- Clear all slots first
+        addon:ClearAllSlots()
+        
+        -- Process each item
+        for _, item in ipairs(addon.db.secondary.items or {}) do
+            -- Map JSON slot name to WoW slot ID
+            local slotName = addon.SLOT_MAP[item.slot]
+            if slotName then
+                -- Get the slot
+                local slot = addon.slots[slotName]
+                if slot then
+                    -- Get item info
+                    local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
+                          itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
+                    
+                    if itemLink then
+                        slot.itemLink = itemLink
+                        slot.icon:SetTexture(itemTexture)
+                        slot.icon:Show()
+                        
+                        -- Set border color based on item quality
+                        if itemRarity > 1 then
+                            local r, g, b = GetItemQualityColor(itemRarity)
+                            slot.IconBorder:SetVertexColor(r, g, b)
+                            slot.IconBorder:Show()
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Update the character model
+        addon.UpdateCharacterModel()
+    else
+        -- Clear the display if no data
+        addon:ClearAllSlots()
+    end
+    
+    -- Update the frame title
+    addon:UpdateFrameTitle()
+    
+    -- Update button states
+    addon:UpdateButtonStates()
+end)
+
+-- Function to update button states based on current set
+function addon:UpdateButtonStates()
+    print("Bissy: Updating button states, current set: " .. addon.currentSet)
+    if addon.currentSet == "primary" then
+        print("Bissy: Setting primary button disabled, secondary button enabled")
+        addon.primaryBtn:Disable()
+        addon.secondaryBtn:Enable()
+    else
+        print("Bissy: Setting primary button enabled, secondary button disabled")
+        addon.primaryBtn:Enable()
+        addon.secondaryBtn:Disable()
+    end
 end
 
--- Map slot names from JSON to WoW slot IDs
-local SLOT_MAP = {
+-- Call once to set initial state
+addon:UpdateButtonStates()
+
+-- Set the portrait icon
+if Bissy.PortraitContainer and Bissy.PortraitContainer.portrait then
+    Bissy.PortraitContainer.portrait:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
+elseif Bissy.portrait then
+    Bissy.portrait:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
+end
+
+-- Hide the divider line at the bottom if it exists
+if Bissy.Inset then
+    Bissy.Inset:Hide()
+end
+if Bissy.BottomInset then
+    Bissy.BottomInset:Hide()
+end
+
+-- Map JSON slot names to WoW slot IDs
+addon.SLOT_MAP = {
     HEAD = "HeadSlot",
     NECK = "NeckSlot",
-    SHOULDERS = "ShoulderSlot",
-    SHOULDER = "ShoulderSlot", -- Alternative name
+    SHOULDER = "ShoulderSlot",
+    SHOULDERS = "ShoulderSlot", -- Alternative name
     BACK = "BackSlot",
     CLOAK = "BackSlot", -- Alternative name
     CHEST = "ChestSlot",
@@ -107,105 +231,6 @@ local SLOT_MAP = {
     SHIRT = "ShirtSlot",
     TABARD = "TabardSlot",
 }
-
--- Create main frame
-local Bissy = CreateFrame("Frame", "Bissy", UIParent, "PortraitFrameTemplate")
-Bissy:Hide()
-Bissy:SetSize(370, 500)
-Bissy:SetPoint("CENTER")
-Bissy:SetMovable(true)
-Bissy:EnableMouse(true)
-Bissy:RegisterForDrag("LeftButton")
-Bissy:SetScript("OnDragStart", Bissy.StartMoving)
-Bissy:SetScript("OnDragStop", function(self)
-    self:StopMovingOrSizing()
-    
-    -- Save position
-    local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint()
-    addon.db.position = {
-        point = point,
-        relativeTo = relativeTo and relativeTo:GetName() or nil,
-        relativePoint = relativePoint,
-        x = xOfs,
-        y = yOfs
-    }
-end)
-Bissy:SetClampedToScreen(true)
-Bissy:SetTitle("Bissy (Primary)")
-
--- Add set switcher buttons
--- Primary button
-local primaryBtn = CreateFrame("Button", nil, Bissy, "UIPanelButtonTemplate")
-primaryBtn:SetText("Primary")
-primaryBtn:SetSize(80, 22)
-primaryBtn:SetPoint("TOP", 0, -35)
-primaryBtn:SetPoint("RIGHT", -5, 0)
-primaryBtn:SetScript("OnClick", function()
-    addon.currentSet = "primary"
-    addon:UpdateFrameTitle()
-    
-    -- Update the display if we have data
-    if addon.db.primary then
-        addon:ProcessImportedData(addon.db.primary)
-    else
-        -- Clear the display if no data
-        addon:ClearAllSlots()
-    end
-    
-    -- Update button states
-    addon:UpdateButtonStates()
-end)
-
--- Secondary button
-local secondaryBtn = CreateFrame("Button", nil, Bissy, "UIPanelButtonTemplate")
-secondaryBtn:SetText("Secondary")
-secondaryBtn:SetSize(80, 22)
-secondaryBtn:SetPoint("TOP", 0, -35)
-secondaryBtn:SetPoint("LEFT", 5, 0)
-secondaryBtn:SetScript("OnClick", function()
-    addon.currentSet = "secondary"
-    addon:UpdateFrameTitle()
-    
-    -- Update the display if we have data
-    if addon.db.secondary then
-        addon:ProcessImportedData(addon.db.secondary)
-    else
-        -- Clear the display if no data
-        addon:ClearAllSlots()
-    end
-    
-    -- Update button states
-    addon:UpdateButtonStates()
-end)
-
--- Function to update button states based on current set
-function addon:UpdateButtonStates()
-    if addon.currentSet == "primary" then
-        primaryBtn:SetEnabled(false)
-        secondaryBtn:SetEnabled(true)
-    else
-        primaryBtn:SetEnabled(true)
-        secondaryBtn:SetEnabled(false)
-    end
-end
-
--- Call once to set initial state
-addon:UpdateButtonStates()
-
--- Set the portrait icon
-if Bissy.PortraitContainer and Bissy.PortraitContainer.portrait then
-    Bissy.PortraitContainer.portrait:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
-elseif Bissy.portrait then
-    Bissy.portrait:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
-end
-
--- Hide the divider line at the bottom if it exists
-if Bissy.Inset then
-    Bissy.Inset:Hide()
-end
-if Bissy.BottomInset then
-    Bissy.BottomInset:Hide()
-end
 
 -- Create character model
 local model = CreateFrame("DressUpModel", nil, Bissy)
@@ -262,6 +287,9 @@ for i, info in ipairs(SLOT_INFO) do
     slots[info.name] = CreateItemSlot(info)
 end
 
+-- Store the slots in the addon
+addon.slots = slots
+
 -- Function to update the character model with equipped items
 local function UpdateCharacterModel()
     -- Reset the model
@@ -291,34 +319,113 @@ end
 -- Make the function available to the addon
 addon.UpdateCharacterModel = UpdateCharacterModel
 
--- Function to clear all slots (for when switching between sets with no data)
+-- Function to clear all item slots
 function addon:ClearAllSlots()
-    -- Create slots array if it doesn't exist
-    addon.slots = addon.slots or {}
-    
-    -- Populate slots array if it's empty
-    if #addon.slots == 0 then
-        for _, info in ipairs(SLOT_INFO) do
-            table.insert(addon.slots, info)
-        end
-    end
-    
-    for _, slot in ipairs(addon.slots) do
-        local button = _G["BissyItem"..slot.name]
-        if button then
-            button.itemLink = nil
-            button.itemID = nil
-            button.icon:SetTexture(nil)
-            button.name:SetText("")
-        end
+    for _, slot in pairs(addon.slots) do
+        slot.itemLink = nil
+        slot.icon:Hide()
+        slot.IconBorder:Hide()
     end
 end
 
--- Show the frame
-Bissy:SetScript("OnShow", function()
-    -- Update the character model when the frame is shown
-    addon.UpdateCharacterModel()
+-- Set up a hook to restore data when frame is shown
+local originalOnShow = Bissy:GetScript("OnShow")
+Bissy:SetScript("OnShow", function(self)
+    -- Call original OnShow if it exists
+    if originalOnShow then
+        originalOnShow(self)
+    end
+    
+    print("Bissy: Frame shown, current set: " .. addon.currentSet)
+    
+    -- Restore imported data for current set
+    if addon.currentSet == "primary" and addon.db.primary then
+        print("Bissy: Restoring primary character set")
+        -- Clear all slots first
+        addon:ClearAllSlots()
+        
+        -- Process each item
+        for _, item in ipairs(addon.db.primary.items or {}) do
+            -- Map JSON slot name to WoW slot ID
+            local slotName = addon.SLOT_MAP[item.slot]
+            if slotName then
+                -- Get the slot
+                local slot = addon.slots[slotName]
+                if slot then
+                    -- Get item info
+                    local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
+                          itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
+                    
+                    if itemLink then
+                        slot.itemLink = itemLink
+                        slot.icon:SetTexture(itemTexture)
+                        slot.icon:Show()
+                        
+                        -- Set border color based on item quality
+                        if itemRarity > 1 then
+                            local r, g, b = GetItemQualityColor(itemRarity)
+                            slot.IconBorder:SetVertexColor(r, g, b)
+                            slot.IconBorder:Show()
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Update the character model
+        addon.UpdateCharacterModel()
+    elseif addon.currentSet == "secondary" and addon.db.secondary then
+        print("Bissy: Restoring secondary character set")
+        -- Clear all slots first
+        addon:ClearAllSlots()
+        
+        -- Process each item
+        for _, item in ipairs(addon.db.secondary.items or {}) do
+            -- Map JSON slot name to WoW slot ID
+            local slotName = addon.SLOT_MAP[item.slot]
+            if slotName then
+                -- Get the slot
+                local slot = addon.slots[slotName]
+                if slot then
+                    -- Get item info
+                    local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
+                          itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
+                    
+                    if itemLink then
+                        slot.itemLink = itemLink
+                        slot.icon:SetTexture(itemTexture)
+                        slot.icon:Show()
+                        
+                        -- Set border color based on item quality
+                        if itemRarity > 1 then
+                            local r, g, b = GetItemQualityColor(itemRarity)
+                            slot.IconBorder:SetVertexColor(r, g, b)
+                            slot.IconBorder:Show()
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Update the character model
+        addon.UpdateCharacterModel()
+    else
+        -- Clear all slots if no data
+        addon:ClearAllSlots()
+    end
+    
+    -- Update the frame title
+    addon:UpdateFrameTitle()
+    
+    -- Update button states
+    addon:UpdateButtonStates()
 end)
+
+-- Show the frame
+-- Bissy:SetScript("OnShow", function()
+--     -- Update the character model when the frame is shown
+--     addon.UpdateCharacterModel()
+-- end)
 
 -- Import dialog
 function addon:ShowImportDialog()
@@ -391,7 +498,7 @@ function addon:ShowImportDialog()
     {"id": 16868, "name": "Pauldrons of Might", "slot": "SHOULDER"},
     {"id": 16865, "name": "Breastplate of Might", "slot": "CHEST"},
     {"id": 16861, "name": "Bracers of Might", "slot": "WRIST"},
-    {"id": 16863, "name": "Gauntlets of Might", "slot": "HANDS"},
+    {"id": 16863, "name": "Gauntlets of Might", "slot": "HAND"},
     {"id": 16864, "name": "Belt of Might", "slot": "WAIST"},
     {"id": 16867, "name": "Legplates of Might", "slot": "LEGS"},
     {"id": 16862, "name": "Sabatons of Might", "slot": "FEET"},
@@ -404,6 +511,7 @@ function addon:ShowImportDialog()
   ]
 }
 ]]
+            print("Bissy: Loading example JSON")
             dialog.editBox:SetText(exampleJson)
         end)
         
@@ -420,41 +528,97 @@ function addon:ShowImportDialog()
                 return
             end
             
-            -- Debug output
-            print("Bissy: Parsing JSON string of length " .. #jsonStr)
+            print("Bissy: Starting import process...")
             
-            -- Extract items using a more flexible pattern matching
-            local data = {}
-            data.items = {}
+            -- Use a very simple approach for testing
+            local data = {
+                name = "Imported Character",
+                items = {}
+            }
             
-            -- Extract character name
-            data.name = jsonStr:match('"name"%s*:%s*"([^"]+)"')
-            if not data.name then
-                data.name = "Unknown Character"
+            -- Extract character name if possible
+            local name = jsonStr:match('"name"%s*:%s*"([^"]+)"')
+            if name then
+                data.name = name
             end
             
-            -- Extract items using a more flexible pattern matching
-            for itemSection in jsonStr:gmatch('(%{[^%{%}]*"slot"%s*:%s*"[^"]+"%s*[^%{%}]*%})') do
-                local id = itemSection:match('"id"%s*:%s*(%d+)')
-                local name = itemSection:match('"name"%s*:%s*"([^"]+)"')
-                local slot = itemSection:match('"slot"%s*:%s*"([^"]+)"')
-                
-                if id and name and slot then
-                    print("Bissy: Found item - " .. name .. " (ID: " .. id .. ", Slot: " .. slot .. ")")
+            -- Extract items with a simpler approach
+            local itemPattern = '{"id":%s*(%d+)%s*,%s*"name":%s*"([^"]+)"%s*,%s*"slot":%s*"([^"]+)"}'
+            for id, name, slot in string.gmatch(jsonStr, itemPattern) do
+                print(string.format("Found item: %s (ID: %s, Slot: %s)", name, id, slot))
+                -- Check if the slot is valid
+                if addon.SLOT_MAP[slot] then
                     table.insert(data.items, {
                         id = tonumber(id),
                         name = name,
                         slot = slot
                     })
+                    print("Bissy: Added item: " .. name)
+                else
+                    print("Bissy: Unknown slot: " .. slot)
                 end
             end
             
+            -- If no items found with the first pattern, try a more flexible one
+            if #data.items == 0 then
+                print("Bissy: Trying alternative pattern...")
+                for id, name, slot in string.gmatch(jsonStr, '"id"%s*:%s*(%d+).-"name"%s*:%s*"([^"]+)".-"slot"%s*:%s*"([^"]+)"') do
+                    print(string.format("Found item: %s (ID: %s, Slot: %s)", name, id, slot))
+                    -- Check if the slot is valid
+                    if addon.SLOT_MAP[slot] then
+                        table.insert(data.items, {
+                            id = tonumber(id),
+                            name = name,
+                            slot = slot
+                        })
+                        print("Bissy: Added item: " .. name)
+                    else
+                        print("Bissy: Unknown slot: " .. slot)
+                    end
+                end
+            end
+            
+            -- If still no items found, try a very direct approach
+            if #data.items == 0 then
+                print("Bissy: Trying direct approach...")
+                -- Print the first 100 characters of the JSON to debug
+                print("JSON preview: " .. string.sub(jsonStr, 1, 100))
+                
+                -- Try to find the items section
+                local itemsSection = jsonStr:match('"items"%s*:%s*%[(.-)%]')
+                if itemsSection then
+                    print("Found items section, length: " .. #itemsSection)
+                    
+                    -- Try a very simple pattern that just looks for IDs and slots
+                    for id, slot in string.gmatch(itemsSection, '"id"%s*:%s*(%d+).-"slot"%s*:%s*"([^"]+)"') do
+                        print(string.format("Found item ID: %s, Slot: %s", id, slot))
+                        -- Check if the slot is valid
+                        if addon.SLOT_MAP[slot] then
+                            table.insert(data.items, {
+                                id = tonumber(id),
+                                name = "Item " .. id,  -- Use a placeholder name
+                                slot = slot
+                            })
+                            print("Bissy: Added item ID: " .. id)
+                        else
+                            print("Bissy: Unknown slot: " .. slot)
+                        end
+                    end
+                else
+                    print("Bissy: Could not find items section")
+                end
+            end
+            
+            -- Debug output
+            print("Bissy: Found " .. #data.items .. " items")
+            
+            -- Process the data
             if #data.items > 0 then
-                print("Bissy: Import successful! Found " .. #data.items .. " items.")
+                print("Bissy: Import successful!")
                 addon:ProcessImportedData(data)
                 dialog:Hide()
             else
-                print("Bissy: Failed to parse import data - no items found")
+                print("Bissy: No items found in import data")
             end
         end)
         
@@ -516,40 +680,43 @@ end)
 
 -- Function to update the frame title based on the current set
 function addon:UpdateFrameTitle()
-    local setName = addon.currentSet == "primary" and "Primary" or "Secondary"
-    local characterName = ""
-    
-    -- Get character name from the current set
-    if addon.currentSet == "primary" and addon.db.primary and addon.db.primary.name then
-        characterName = " - " .. addon.db.primary.name
-    elseif addon.currentSet == "secondary" and addon.db.secondary and addon.db.secondary.name then
-        characterName = " - " .. addon.db.secondary.name
+    print("Bissy: Updating frame title, current set: " .. addon.currentSet)
+    if addon.currentSet == "primary" then
+        Bissy:SetTitle("Bissy (Primary)")
+    else
+        Bissy:SetTitle("Bissy (Secondary)")
     end
-    
-    Bissy:SetTitle("Bissy (" .. setName .. ")" .. characterName)
 end
 
 -- Process imported data
 function addon:ProcessImportedData(data)
-    if not data then
-        print("Bissy: Import data is nil")
-        return
-    end
+    print("Bissy: Processing imported data for set: " .. addon.currentSet)
     
-    -- Save the data to the appropriate set
+    -- Save the data to the current set
     if addon.currentSet == "primary" then
         addon.db.primary = data
-    else
+        print("Bissy: Saved to primary set")
+        
+        -- Update primary items array for tooltip integration
+        addon.primaryItems = {}
+        for _, item in ipairs(data.items) do
+            table.insert(addon.primaryItems, item.id)
+        end
+    elseif addon.currentSet == "secondary" then
         addon.db.secondary = data
+        print("Bissy: Saved to secondary set")
+        
+        -- Update secondary items array for tooltip integration
+        addon.secondaryItems = {}
+        for _, item in ipairs(data.items) do
+            table.insert(addon.secondaryItems, item.id)
+        end
     end
     
-    -- Hide any existing frame before showing the new one
-    if Bissy:IsShown() then
-        Bissy:Hide()
-    end
-    
-    -- Show the frame
-    Bissy:Show()
+    -- Don't show the frame automatically
+    -- if not Bissy:IsShown() then
+    --     Bissy:Show()
+    -- end
     
     -- Check if we have items
     if not data.items then
@@ -558,33 +725,17 @@ function addon:ProcessImportedData(data)
     end
     
     -- Clear all slots first
-    for slotName, slot in pairs(slots) do
-        if slot.SetNormalTexture then
-            -- Use appropriate texture based on slot
-            local slotTexture = "Interface\\PaperDoll\\UI-PaperDoll-Slot-" .. slotName
-            slot:SetNormalTexture(slotTexture)
-        end
-        slot.itemLink = nil
-        if slot.icon then
-            slot.icon:Hide()
-        end
-        if slot.IconBorder then
-            slot.IconBorder:Hide()
-        end
-    end
-    
-    -- Track how many items were successfully equipped
-    local equippedCount = 0
+    addon:ClearAllSlots()
     
     -- Process each item
     for _, item in ipairs(data.items) do
         -- Map JSON slot name to WoW slot ID
-        local slotName = SLOT_MAP[item.slot]
+        local slotName = addon.SLOT_MAP[item.slot]
         if not slotName then
             addon:Debug("Unknown slot:", (item.slot or "nil"))
         else
             -- Get the slot
-            local slot = slots[slotName]
+            local slot = addon.slots[slotName]
             if not slot then
                 addon:Debug("Slot not found:", slotName)
             else
@@ -592,50 +743,38 @@ function addon:ProcessImportedData(data)
                 local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
                       itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
                 
+                if not itemLink then
+                    -- Try to get item info via GetItemInfoInstant
+                    local name, _, _, _, _, _, _, _, _, texture = GetItemInfoInstant(item.id)
+                    if name then
+                        -- We have some basic info, but not the full item link
+                        -- Use a placeholder link for now
+                        itemLink = "item:" .. item.id .. ":0:0:0:0:0:0:0"
+                        itemName = name
+                        itemTexture = texture
+                        -- Request item info to cache it for later
+                        addon:Debug("Requesting item info for:", name)
+                    else
+                        addon:Debug("Item not found:", (item.id or "nil"))
+                        -- Skip this item and continue with the next one
+                    end
+                end
+                
+                -- Only set the item if we have a valid itemLink
                 if itemLink then
+                    -- Set the item
                     slot.itemLink = itemLink
                     slot.icon:SetTexture(itemTexture)
                     slot.icon:Show()
                     
                     -- Set border color based on item quality
-                    if itemRarity > 1 then
+                    if itemRarity and itemRarity > 1 then
                         local r, g, b = GetItemQualityColor(itemRarity)
                         slot.IconBorder:SetVertexColor(r, g, b)
                         slot.IconBorder:Show()
-                    else
-                        slot.IconBorder:Hide()
                     end
                     
-                    equippedCount = equippedCount + 1
-                else
-                    -- Item not in cache, request it
-                    local item = Item:CreateFromItemID(item.id)
-                    item:ContinueOnItemLoad(function()
-                        local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
-                              itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
-                        
-                        if itemLink then
-                            slot.itemLink = itemLink
-                            slot.icon:SetTexture(itemTexture)
-                            slot.icon:Show()
-                            
-                            -- Set border color based on item quality
-                            if itemRarity > 1 then
-                                local r, g, b = GetItemQualityColor(itemRarity)
-                                slot.IconBorder:SetVertexColor(r, g, b)
-                                slot.IconBorder:Show()
-                            else
-                                slot.IconBorder:Hide()
-                            end
-                            
-                            equippedCount = equippedCount + 1
-                            
-                            -- Update the model
-                            addon.UpdateCharacterModel()
-                        else
-                            addon:Debug("Failed to load item info even after request")
-                        end
-                    end)
+                    addon:Debug("Set item:", itemName, "in slot:", slotName)
                 end
             end
         end
@@ -644,171 +783,235 @@ function addon:ProcessImportedData(data)
     -- Update the character model
     addon.UpdateCharacterModel()
     
-    addon:Debug("Import complete.", equippedCount, "items equipped.")
-    
     -- Update the frame title
     addon:UpdateFrameTitle()
     
     -- Update button states
     addon:UpdateButtonStates()
     
-    -- Store the imported data
-    if addon.currentSet == "primary" then
-        addon.primaryItems = {}
-        for _, item in ipairs(data.items) do
-            table.insert(addon.primaryItems, item.id)
-        end
-    elseif addon.currentSet == "secondary" then
-        addon.secondaryItems = {}
-        for _, item in ipairs(data.items) do
-            table.insert(addon.secondaryItems, item.id)
-        end
-    end
+    print("Bissy: Finished processing imported data")
 end
 
--- Fallback JSON parser for when the main parser fails
-function addon:FallbackJSONParse(jsonStr)
-    addon:Debug("Using fallback JSON parser")
+-- Test JSON parsing
+function addon:TestJSONParse(jsonStr)
+    if not jsonStr or jsonStr == "" then
+        return false, "Empty JSON string"
+    end
     
-    -- Try to parse with a simple approach
-    local success, data = pcall(function()
-        -- Very simple JSON parser for basic structures
-        local parsed = loadstring("return " .. jsonStr:gsub("([%w_]+):", "[%1]="):gsub("%[%s*([%w_\"\']+)%s*%]", "[%1]"))()
-        return parsed
-    end)
+    -- Debug output
+    print("Bissy: Parsing JSON string of length: " .. #jsonStr)
+    print("Bissy: First 100 chars: " .. jsonStr:sub(1, 100))
     
-    if not success or not data then
-        -- Try another approach - extract specific fields
-        local result = {}
-        result.name = jsonStr:match('"name"%s*:%s*"([^"]+)"')
-        result.items = {}
+    -- Try to use the JSON library
+    if addon.json then
+        local success, result
         
-        -- Extract items with regex
-        for id, name, slot in jsonStr:gmatch('"id"%s*:%s*(%d+)%s*,%s*"name"%s*:%s*"([^"]+)"%s*,%s*"slot"%s*:%s*"([^"]+)"') do
+        -- Use the parse function
+        success, result = pcall(function()
+            return addon.json.parse(jsonStr)
+        end)
+        
+        if success and result then
+            -- Fix for null values in the JSON library
+            if result.items == addon.json.null then
+                result.items = {}
+            end
+            
+            -- Ensure items is a table
+            if not result.items then
+                result.items = {}
+            end
+            
+            return true, result
+        else
+            print("Bissy: JSON parse error: " .. tostring(result))
+        end
+    end
+    
+    -- If we get here, either there's no JSON library or parsing failed
+    print("Bissy: Falling back to built-in parser")
+    
+    -- Create a basic result
+    local result = {}
+    
+    -- Extract character name
+    result.name = jsonStr:match('"name"%s*:%s*"([^"]+)"')
+    if not result.name then
+        result.name = "Imported Character"
+    end
+    
+    -- Extract items
+    result.items = {}
+    
+    -- Try to find the items section
+    local itemsSection = jsonStr:match('"items"%s*:%s*%[(.-)%]')
+    if itemsSection then
+        print("Bissy: Found items section, length: " .. #itemsSection)
+        
+        -- Use a more robust approach to extract items
+        local startPos = 1
+        while startPos <= #itemsSection do
+            -- Find the start of an item object
+            local itemStart = itemsSection:find("{", startPos)
+            if not itemStart then break end
+            
+            -- Find the matching end bracket
+            local depth = 1
+            local itemEnd = itemStart
+            while depth > 0 and itemEnd < #itemsSection do
+                itemEnd = itemEnd + 1
+                local char = itemsSection:sub(itemEnd, itemEnd)
+                if char == "{" then
+                    depth = depth + 1
+                elseif char == "}" then
+                    depth = depth - 1
+                end
+            end
+            
+            if depth == 0 then
+                -- Extract the complete item object
+                local itemStr = itemsSection:sub(itemStart, itemEnd)
+                print("Bissy: Found item: " .. itemStr)
+                
+                -- Extract item properties
+                local id = itemStr:match('"id"%s*:%s*(%d+)')
+                local name = itemStr:match('"name"%s*:%s*"([^"]+)"')
+                local slot = itemStr:match('"slot"%s*:%s*"([^"]+)"')
+                
+                print("Bissy: Extracted - ID: " .. (id or "nil") .. 
+                      ", Name: " .. (name or "nil") .. 
+                      ", Slot: " .. (slot or "nil"))
+                
+                if id and name and slot then
+                    table.insert(result.items, {
+                        id = tonumber(id),
+                        name = name,
+                        slot = slot
+                    })
+                    print("Bissy: Added item: " .. name)
+                end
+                
+                startPos = itemEnd + 1
+            else
+                -- Unmatched brackets, something went wrong
+                print("Bissy: Error parsing item - unmatched brackets")
+                break
+            end
+        end
+    else
+        -- Fallback to more basic pattern matching
+        for id, name, slot in jsonStr:gmatch('"id"%s*:%s*(%d+)[^}]*"name"%s*:%s*"([^"]+)"[^}]*"slot"%s*:%s*"([^"]+)"') do
             table.insert(result.items, {
                 id = tonumber(id),
                 name = name,
                 slot = slot
             })
         end
-        
-        if #result.items > 0 then
-            return result
-        end
-    else
-        return data
     end
     
-    return nil
+    if #result.items > 0 then
+        return true, result
+    else
+        return false, "No items found in import data"
+    end
+end
+
+-- Test JSON parsing with a hardcoded example
+function addon:TestDirectParse()
+    local testJson = [[
+{
+  "name": "Test Character",
+  "items": [
+    {"id": 12345, "name": "Test Head Item", "slot": "HEAD"},
+    {"id": 12346, "name": "Test Neck Item", "slot": "NECK"},
+    {"id": 12347, "name": "Test Shoulder Item", "slot": "SHOULDER"}
+  ]
+}
+]]
+    print("Bissy: Running direct parse test")
+    local success, result = addon:TestJSONParse(testJson)
+    if success then
+        print("Bissy: Direct parse test successful!")
+        print("Character name: " .. (result.name or "Unknown"))
+        print("Items: " .. (result.items and #result.items or 0))
+        
+        if result.items and #result.items > 0 then
+            for i, item in ipairs(result.items) do
+                print(string.format("Item %d: %s (ID: %d, Slot: %s)", 
+                    i, item.name, item.id, item.slot))
+            end
+        end
+    else
+        print("Bissy: Direct parse test failed: " .. tostring(result))
+    end
 end
 
 -- Function to initialize the addon
 function addon:OnInitialize()
-    -- Initialize database
-    addon.db = BissyDB or {}
-    BissyDB = addon.db
-    
     -- Restore position if saved
     if addon.db.position then
-        Bissy:ClearAllPoints()
-        -- Safe position loading
         local pos = addon.db.position
-        if pos.point and pos.relativePoint and pos.x and pos.y then
-            Bissy:SetPoint(pos.point, pos.relativeTo, pos.relativePoint, pos.x, pos.y)
-        else
-            -- Default position if saved position is invalid
-            Bissy:SetPoint("CENTER")
+        Bissy:ClearAllPoints()
+        Bissy:SetPoint(pos.point, pos.relativeTo, pos.relativePoint, pos.x, pos.y)
+    end
+    
+    -- Load primary and secondary items
+    if addon.db.primary and addon.db.primary.items then
+        for _, item in ipairs(addon.db.primary.items) do
+            table.insert(addon.primaryItems, item.id)
         end
     end
     
-    -- Load any saved import data
-    if addon.db.primary or addon.db.secondary then
-        addon:Debug("Found saved character data")
-        
-        -- Populate item lists for tooltip integration
-        addon.primaryItems = {}
-        addon.secondaryItems = {}
-        
-        if addon.db.primary and addon.db.primary.items then
-            for _, item in ipairs(addon.db.primary.items) do
-                table.insert(addon.primaryItems, item.id)
-            end
+    if addon.db.secondary and addon.db.secondary.items then
+        for _, item in ipairs(addon.db.secondary.items) do
+            table.insert(addon.secondaryItems, item.id)
         end
-        
-        if addon.db.secondary and addon.db.secondary.items then
-            for _, item in ipairs(addon.db.secondary.items) do
-                table.insert(addon.secondaryItems, item.id)
-            end
-        end
-        
-        -- Set up a hook to restore data when frame is shown
-        local originalOnShow = Bissy:GetScript("OnShow")
-        Bissy:SetScript("OnShow", function(self)
-            -- Call original OnShow if it exists
-            if originalOnShow then
-                originalOnShow(self)
-            end
-            
-            -- Restore imported data for current set
-            if addon.currentSet == "primary" and addon.db.primary then
-                addon:Debug("Restoring primary character set")
-                addon:ProcessImportedData(addon.db.primary)
-            elseif addon.currentSet == "secondary" and addon.db.secondary then
-                addon:Debug("Restoring secondary character set")
-                addon:ProcessImportedData(addon.db.secondary)
-            else
-                -- Clear all slots if no data
-                addon:ClearAllSlots()
-            end
-            
-            -- Update the frame title
-            addon:UpdateFrameTitle()
-            
-            -- Update button states
-            addon:UpdateButtonStates()
-        end)
     end
 end
 
--- Add slash command
-SLASH_BISSY1 = "/bissy"
-SlashCmdList["BISSY"] = function(msg)
-    local command = msg:match("^%s*(%S+)") or ""
+-- Handle slash commands
+function addon:HandleSlashCommand(msg)
+    local command, rest = msg:match("^(%S*)%s*(.-)$")
     command = command:lower()
     
-    if command == "reset" or command == "resetpos" then
-        -- Reset the position
+    if command == "show" or command == "" then
+        -- Toggle visibility
+        if Bissy:IsShown() then
+            Bissy:Hide()
+        else
+            Bissy:Show()
+        end
+    elseif command == "reset" then
+        -- Reset position
         Bissy:ClearAllPoints()
         Bissy:SetPoint("CENTER")
         addon.db.position = nil
-        print("Bissy: Position has been reset.")
-    elseif command == "import" then
-        addon:ShowImportDialog()
+        print("Bissy: Position reset")
     elseif command == "test" then
-        -- Test the JSON parser
-        if not json or not json.decode then
-            print("Bissy: JSON module not loaded")
-            return
-        end
-        
+        -- Test JSON parsing with a simple JSON string
         local testJson = [[
 {
   "name": "Test Character",
   "items": [
-    {"id": 18832, "name": "Brutality Blade", "slot": "MAIN_HAND"},
-    {"id": 18805, "name": "Core Hound Tooth", "slot": "OFF_HAND"}
+    {"id": 12345, "name": "Test Head Item", "slot": "HEAD"},
+    {"id": 12346, "name": "Test Neck Item", "slot": "NECK"},
+    {"id": 12347, "name": "Test Shoulder Item", "slot": "SHOULDER"}
   ]
 }
 ]]
-        
-        local success, result = pcall(function() return json.decode(testJson) end)
-        if success and result then
-            print("Bissy: JSON test successful")
+        local success, result = addon:TestJSONParse(testJson)
+        if success then
+            print("Bissy: JSON test successful!")
             print("Character name: " .. (result.name or "Unknown"))
             print("Items: " .. (result.items and #result.items or 0))
         else
             print("Bissy: JSON test failed: " .. tostring(result))
         end
+    elseif command == "directtest" then
+        -- Run the direct parse test
+        addon:TestDirectParse()
+    elseif command == "import" then
+        addon:ShowImportDialog()
     elseif command == "primary" then
         -- Switch to primary set
         addon.currentSet = "primary"
@@ -818,9 +1021,47 @@ SlashCmdList["BISSY"] = function(msg)
         addon:UpdateButtonStates()
         
         -- Update if frame is shown
-        if Bissy:IsShown() and addon.db.primary then
-            addon:ProcessImportedData(addon.db.primary)
-        else
+        if Bissy:IsShown() then
+            if addon.db.primary then
+                -- Clear all slots first
+                addon:ClearAllSlots()
+                
+                -- Process each item
+                for _, item in ipairs(addon.db.primary.items or {}) do
+                    -- Map JSON slot name to WoW slot ID
+                    local slotName = addon.SLOT_MAP[item.slot]
+                    if slotName then
+                        -- Get the slot
+                        local slot = addon.slots[slotName]
+                        if slot then
+                            -- Get item info
+                            local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
+                                  itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
+                            
+                            if itemLink then
+                                slot.itemLink = itemLink
+                                slot.icon:SetTexture(itemTexture)
+                                slot.icon:Show()
+                                
+                                -- Set border color based on item quality
+                                if itemRarity > 1 then
+                                    local r, g, b = GetItemQualityColor(itemRarity)
+                                    slot.IconBorder:SetVertexColor(r, g, b)
+                                    slot.IconBorder:Show()
+                                end
+                            end
+                        end
+                    end
+                end
+                
+                -- Update the character model
+                addon.UpdateCharacterModel()
+            else
+                -- Clear the display if no data
+                addon:ClearAllSlots()
+            end
+            
+            -- Update the frame title
             addon:UpdateFrameTitle()
         end
     elseif command == "secondary" then
@@ -832,9 +1073,47 @@ SlashCmdList["BISSY"] = function(msg)
         addon:UpdateButtonStates()
         
         -- Update if frame is shown
-        if Bissy:IsShown() and addon.db.secondary then
-            addon:ProcessImportedData(addon.db.secondary)
-        else
+        if Bissy:IsShown() then
+            if addon.db.secondary then
+                -- Clear all slots first
+                addon:ClearAllSlots()
+                
+                -- Process each item
+                for _, item in ipairs(addon.db.secondary.items or {}) do
+                    -- Map JSON slot name to WoW slot ID
+                    local slotName = addon.SLOT_MAP[item.slot]
+                    if slotName then
+                        -- Get the slot
+                        local slot = addon.slots[slotName]
+                        if slot then
+                            -- Get item info
+                            local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
+                                  itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
+                            
+                            if itemLink then
+                                slot.itemLink = itemLink
+                                slot.icon:SetTexture(itemTexture)
+                                slot.icon:Show()
+                                
+                                -- Set border color based on item quality
+                                if itemRarity > 1 then
+                                    local r, g, b = GetItemQualityColor(itemRarity)
+                                    slot.IconBorder:SetVertexColor(r, g, b)
+                                    slot.IconBorder:Show()
+                                end
+                            end
+                        end
+                    end
+                end
+                
+                -- Update the character model
+                addon.UpdateCharacterModel()
+            else
+                -- Clear the display if no data
+                addon:ClearAllSlots()
+            end
+            
+            -- Update the frame title
             addon:UpdateFrameTitle()
         end
     elseif command == "resetdata" then
@@ -873,9 +1152,9 @@ SlashCmdList["BISSY"] = function(msg)
         print("Bissy commands:")
         print("  /bissy - Toggle the Bissy frame")
         print("  /bissy reset - Reset the frame position")
-        print("  /bissy resetpos - Reset the frame position")
         print("  /bissy import - Show the import dialog")
         print("  /bissy test - Test the addon")
+        print("  /bissy directtest - Run the direct parse test")
         print("  /bissy primary - Switch to primary character set")
         print("  /bissy secondary - Switch to secondary character set")
         print("  /bissy resetdata - Reset all stored character data")
@@ -887,65 +1166,34 @@ SlashCmdList["BISSY"] = function(msg)
     end
 end
 
+-- Add slash command
+SLASH_BISSY1 = "/bissy"
+SlashCmdList["BISSY"] = function(msg)
+    addon:HandleSlashCommand(msg)
+end
+
 -- Event handler
 local function OnEvent(self, event, ...)
-    if event == "ADDON_LOADED" and ... == addonName then
-        -- Check if JSON module is loaded
-        if DEFAULT_CHAT_FRAME then
-            if LoadJSONModule() then
-                DEFAULT_CHAT_FRAME:AddMessage("Bissy: Loaded successfully", 0, 1, 0)
-            else
-                DEFAULT_CHAT_FRAME:AddMessage("Bissy: Failed to load JSON module", 1, 0, 0)
-            end
-        end
-        
-        -- Hook tooltip to show BiS status
-        GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
-            local name, link = tooltip:GetItem()
-            if not link then return end
-            
-            local itemId = tonumber(string.match(link, "item:(%d+)"))
-            if not itemId then return end
-            
-            local isPrimaryBest = false
-            local isSecondaryBest = false
-            
-            -- Check if it's in primary list
-            if addon.primaryItems then
-                for _, id in ipairs(addon.primaryItems) do
-                    if id == itemId then
-                        isPrimaryBest = true
-                        break
-                    end
-                end
-            end
-            
-            -- Check if it's in secondary list
-            if addon.secondaryItems then
-                for _, id in ipairs(addon.secondaryItems) do
-                    if id == itemId then
-                        isSecondaryBest = true
-                        break
-                    end
-                end
-            end
-            
-            -- Add tooltip line if it's in either list
-            if isPrimaryBest or isSecondaryBest then
-                tooltip:AddLine(" ") -- Empty line for spacing
-                tooltip:AddLine("Your best!", 1, 1, 1) -- White text
-                
-                if isPrimaryBest then
-                    tooltip:AddLine("Primary Set", 0, 1, 0) -- Green text
-                end
-                
-                if isSecondaryBest then
-                    tooltip:AddLine("Secondary Set", 0, 1, 0) -- Green text
-                end
-            end
-        end)
+    if event == "ADDON_LOADED" and ... == "Bissy" then
+        print("Bissy: Addon loaded")
         
         -- Initialize the addon
+        addon.db = BissyDB or {}
+        BissyDB = addon.db
+        
+        -- Set default character set
+        addon.currentSet = addon.currentSet or "primary"
+        print("Bissy: Addon loaded with current set: " .. addon.currentSet)
+        
+        -- Initialize character sets if they don't exist
+        addon.db.primary = addon.db.primary or {}
+        addon.db.secondary = addon.db.secondary or {}
+        
+        -- Initialize item arrays
+        addon.primaryItems = {}
+        addon.secondaryItems = {}
+        
+        -- Call the initialize function
         addon:OnInitialize()
     end
 end

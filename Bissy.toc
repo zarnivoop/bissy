@@ -1,4 +1,4 @@
-## Interface: 100200
+## Interface: 11506
 ## Title: Bissy
 ## Notes: A minimalistic character sheet addon
 ## Author: Stefan

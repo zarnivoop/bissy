@@ -1,0 +1,9 @@
+package-as: Bissy
+enable-nolib-creation: no
+
+ignore:
+  - .github
+  - .gitignore
+  - .pkgmeta
+  - import-example.json
+  - release.sh

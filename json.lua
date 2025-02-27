@@ -1,333 +1,194 @@
---[[
-Simple JSON parser for WoW addons
-]]
+--[[ json.lua
 
-local addonName, addon = ...
+A compact pure-Lua JSON library.
+The main functions are: json.stringify, json.parse.
+
+## json.stringify:
+
+This expects the following to be true of any tables being encoded:
+ * They only have string or number keys. Number keys must be represented as
+   strings in json; this is part of the json spec.
+ * They are not recursive. Such a structure cannot be specified in json.
+
+A Lua table is considered to be an array if and only if its set of keys is a
+consecutive sequence of positive integers starting at 1. Arrays are encoded like
+so: `[2, 3, false, "hi"]`. Any other type of Lua table is encoded as a json
+object, encoded like so: `{"key1": 2, "key2": false}`.
+
+Because the Lua nil value cannot be a key, and as a table value is considerd
+equivalent to a missing key, there is no way to express the json "null" value in
+a Lua table. The only way this will output "null" is if your entire input obj is
+nil itself.
+
+An empty Lua table, {}, could be considered either a json object or array -
+it's an ambiguous edge case. We choose to treat this as an object as it is the
+more general type.
+
+To be clear, none of the above considerations is a limitation of this code.
+Rather, it is what we get when we completely observe the json specification for
+as arbitrary a Lua object as json is capable of expressing.
+
+## json.parse:
+
+This function parses json, with the exception that it does not pay attention to
+\u-escaped unicode code points in strings.
+
+It is difficult for Lua to return null as a value. In order to prevent the loss
+of keys with a null value in a json string, this function uses the one-off
+table value json.null (which is just an empty table) to indicate null values.
+This way you can check if a value is null with the conditional
+`val == json.null`.
+
+If you have control over the data and are using Lua, I would recommend just
+avoiding null values in your data to begin with.
+
+--]]
+
 
 local json = {}
-addon.json = json
 
--- Simple recursive JSON parser
-function json.decode(str)
-    print("Bissy JSON: Starting to parse JSON string of length " .. #str)
-    if #str < 10 then
-        print("Bissy JSON: Input too short: " .. str)
-        return nil
-    end
-    
-    -- Check if it starts with { or [
-    local firstChar = str:match("^%s*(.)")
-    if firstChar ~= "{" and firstChar ~= "[" then
-        print("Bissy JSON: Invalid JSON, must start with { or [, got: " .. firstChar)
-        return nil
-    end
-    
-    -- Remove comments and whitespace
-    str = str:gsub("/%*.-%*/", "") -- Remove /* */ comments
-    str = str:gsub("//.-\n", "\n") -- Remove // comments
-    
-    -- Position tracker
-    local pos = 1
-    
-    -- Forward declarations
-    local parseValue, parseObject, parseArray, parseString, parseNumber
-    
-    -- Skip whitespace
-    local function skipWhitespace()
-        local _, newPos = str:find("^[ \t\n\r]*", pos)
-        if newPos then pos = newPos + 1 end
-    end
-    
-    -- Parse a string value
-    parseString = function()
-        local startPos = pos
-        pos = pos + 1 -- Skip opening quote
-        
-        local value = ""
-        local escaped = false
-        
-        while pos <= #str do
-            local c = str:sub(pos, pos)
-            
-            if escaped then
-                if c == '"' or c == '\\' or c == '/' then
-                    value = value .. c
-                elseif c == 'b' then
-                    value = value .. '\b'
-                elseif c == 'f' then
-                    value = value .. '\f'
-                elseif c == 'n' then
-                    value = value .. '\n'
-                elseif c == 'r' then
-                    value = value .. '\r'
-                elseif c == 't' then
-                    value = value .. '\t'
-                elseif c == 'u' then
-                    -- Unicode escape (not fully implemented)
-                    value = value .. '\\u' .. str:sub(pos+1, pos+4)
-                    pos = pos + 4
-                else
-                    value = value .. '\\' .. c
-                end
-                escaped = false
-            elseif c == '\\' then
-                escaped = true
-            elseif c == '"' then
-                pos = pos + 1
-                return value
-            else
-                value = value .. c
-            end
-            
-            pos = pos + 1
-        end
-        
-        print("Bissy JSON: Unterminated string starting at position " .. startPos)
-        error("Unterminated string starting at position " .. startPos)
-    end
-    
-    -- Parse a number value
-    parseNumber = function()
-        local startPos = pos
-        local endPos = str:find("[^0-9%.eE%+%-]", pos)
-        if not endPos then endPos = #str + 1 end
-        
-        local numStr = str:sub(pos, endPos - 1)
-        pos = endPos
-        
-        return tonumber(numStr)
-    end
-    
-    -- Parse a JSON array
-    parseArray = function()
-        local arr = {}
-        pos = pos + 1 -- Skip opening bracket
-        
-        skipWhitespace()
-        
-        -- Handle empty array
-        if str:sub(pos, pos) == "]" then
-            pos = pos + 1
-            return arr
-        end
-        
-        while pos <= #str do
-            -- Parse array element
-            table.insert(arr, parseValue())
-            
-            skipWhitespace()
-            
-            local c = str:sub(pos, pos)
-            pos = pos + 1
-            
-            if c == "]" then
-                return arr
-            elseif c ~= "," then
-                print("JSON Error: Expected ',' or ']' in array at position " .. pos)
-                return arr -- Return what we have so far instead of erroring
-            end
-            
-            skipWhitespace()
-        end
-        
-        print("JSON Error: Unterminated array")
-        return arr -- Return what we have so far
-    end
-    
-    -- Parse an object
-    parseObject = function()
-        local obj = {}
-        pos = pos + 1 -- Skip opening brace
-        
-        skipWhitespace()
-        
-        -- Handle empty object
-        if str:sub(pos, pos) == "}" then
-            pos = pos + 1
-            return obj
-        end
-        
-        while pos <= #str do
-            skipWhitespace()
-            
-            -- Parse key
-            if str:sub(pos, pos) ~= "\"" then
-                print("JSON Error: Expected '\"' at start of object key at position " .. pos)
-                return obj
-            end
-            
-            local key = parseString()
-            
-            skipWhitespace()
-            
-            -- Check for colon
-            if str:sub(pos, pos) ~= ":" then
-                print("JSON Error: Expected ':' after key in object at position " .. pos)
-                return obj
-            end
-            
-            pos = pos + 1 -- Skip colon
-            
-            -- Parse value
-            obj[key] = parseValue()
-            
-            skipWhitespace()
-            
-            local c = str:sub(pos, pos)
-            pos = pos + 1
-            
-            if c == "}" then
-                return obj
-            elseif c ~= "," then
-                print("JSON Error: Expected ',' or '}' in object at position " .. pos)
-                return obj -- Return what we have so far instead of erroring
-            end
-        end
-        
-        print("JSON Error: Unterminated object")
-        return obj -- Return what we have so far
-    end
-    
-    -- Parse any JSON value
-    parseValue = function()
-        skipWhitespace()
-        
-        local c = str:sub(pos, pos)
-        
-        if c == '"' then
-            return parseString()
-        elseif c == '{' then
-            return parseObject()
-        elseif c == '[' then
-            return parseArray()
-        elseif c == 't' and str:sub(pos, pos+3) == "true" then
-            pos = pos + 4
-            return true
-        elseif c == 'f' and str:sub(pos, pos+4) == "false" then
-            pos = pos + 5
-            return false
-        elseif c == 'n' and str:sub(pos, pos+3) == "null" then
-            pos = pos + 4
-            return nil
-        elseif c:match("[%d%-]") then
-            return parseNumber()
-        else
-            error("Unexpected character at position " .. pos .. ": " .. c)
-        end
-    end
-    
-    -- Start parsing
-    local success, result = pcall(parseValue)
-    if not success then
-        print("Bissy JSON: Error parsing JSON: " .. tostring(result))
-        return nil
-    end
-    
-    skipWhitespace()
-    
-    if pos <= #str then
-        print("Bissy JSON: Unexpected trailing characters at position " .. pos)
-    end
-    
-    print("Bissy JSON: Successfully parsed JSON")
-    return result
+
+-- Internal functions.
+
+local function kind_of(obj)
+  if type(obj) ~= 'table' then return type(obj) end
+  local i = 1
+  for _ in pairs(obj) do
+    if obj[i] ~= nil then i = i + 1 else return 'table' end
+  end
+  if i == 1 then return 'table' else return 'array' end
 end
 
--- Encode a Lua table to JSON
-function json.encode(value, pretty)
-    local indent = pretty and "  " or ""
-    local level = 0
-    
-    local forward_declarations
-    local encode
-    
-    local function indentation()
-        if not pretty then return "" end
-        return string.rep(indent, level)
+local function escape_str(s)
+  local in_char  = {'\\', '"', '/', '\b', '\f', '\n', '\r', '\t'}
+  local out_char = {'\\', '"', '/',  'b',  'f',  'n',  'r',  't'}
+  for i, c in ipairs(in_char) do
+    s = s:gsub(c, '\\' .. out_char[i])
+  end
+  return s
+end
+
+-- Returns pos, did_find; there are two cases:
+-- 1. Delimiter found: pos = pos after leading space + delim; did_find = true.
+-- 2. Delimiter not found: pos = pos after leading space;     did_find = false.
+-- This throws an error if err_if_missing is true and the delim is not found.
+local function skip_delim(str, pos, delim, err_if_missing)
+  pos = pos + #str:match('^%s*', pos)
+  if str:sub(pos, pos) ~= delim then
+    if err_if_missing then
+      error('Expected ' .. delim .. ' near position ' .. pos)
     end
-    
-    local function encodeString(str)
-        str = str:gsub('\\', '\\\\')
-        str = str:gsub('"', '\\"')
-        str = str:gsub('\n', '\\n')
-        str = str:gsub('\r', '\\r')
-        str = str:gsub('\t', '\\t')
-        str = str:gsub('\b', '\\b')
-        str = str:gsub('\f', '\\f')
-        return '"' .. str .. '"'
+    return pos, false
+  end
+  return pos + 1, true
+end
+
+-- Expects the given pos to be the first character after the opening quote.
+-- Returns val, pos; the returned pos is after the closing quote character.
+local function parse_str_val(str, pos, val)
+  val = val or ''
+  local early_end_error = 'End of input found while parsing string.'
+  if pos > #str then error(early_end_error) end
+  local c = str:sub(pos, pos)
+  if c == '"'  then return val, pos + 1 end
+  if c ~= '\\' then return parse_str_val(str, pos + 1, val .. c) end
+  -- We must have a \ character.
+  local esc_map = {b = '\b', f = '\f', n = '\n', r = '\r', t = '\t'}
+  local nextc = str:sub(pos + 1, pos + 1)
+  if not nextc then error(early_end_error) end
+  return parse_str_val(str, pos + 2, val .. (esc_map[nextc] or nextc))
+end
+
+-- Returns val, pos; the returned pos is after the number's final character.
+local function parse_num_val(str, pos)
+  local num_str = str:match('^-?%d+%.?%d*[eE]?[+-]?%d*', pos)
+  local val = tonumber(num_str)
+  if not val then error('Error parsing number at position ' .. pos .. '.') end
+  return val, pos + #num_str
+end
+
+
+-- Public values and functions.
+
+function json.stringify(obj, as_key)
+  local s = {}  -- We'll build the string as an array of strings to be concatenated.
+  local kind = kind_of(obj)  -- This is 'array' if it's an array or type(obj) otherwise.
+  if kind == 'array' then
+    if as_key then error('Can\'t encode array as key.') end
+    s[#s + 1] = '['
+    for i, val in ipairs(obj) do
+      if i > 1 then s[#s + 1] = ', ' end
+      s[#s + 1] = json.stringify(val)
     end
-    
-    encode = function(val, isObjectValue)
-        local valType = type(val)
-        
-        if val == nil then
-            return "null"
-        elseif valType == "number" then
-            return tostring(val)
-        elseif valType == "boolean" then
-            return val and "true" or "false"
-        elseif valType == "string" then
-            return encodeString(val)
-        elseif valType == "table" then
-            local isArray = true
-            local n = 0
-            
-            -- Check if it's an array
-            for k, _ in pairs(val) do
-                if type(k) ~= "number" or k <= 0 or math.floor(k) ~= k then
-                    isArray = false
-                    break
-                end
-                n = math.max(n, k)
-            end
-            
-            if isArray and n > 0 then
-                level = level + 1
-                local parts = {}
-                for i = 1, n do
-                    if pretty then
-                        table.insert(parts, indentation() .. encode(val[i]))
-                    else
-                        table.insert(parts, encode(val[i]))
-                    end
-                end
-                level = level - 1
-                
-                if pretty then
-                    return "[\n" .. table.concat(parts, ",\n") .. "\n" .. indentation() .. "]"
-                else
-                    return "[" .. table.concat(parts, ",") .. "]"
-                end
-            else
-                level = level + 1
-                local parts = {}
-                for k, v in pairs(val) do
-                    if type(k) == "string" then
-                        if pretty then
-                            table.insert(parts, indentation() .. encodeString(k) .. ": " .. encode(v, true))
-                        else
-                            table.insert(parts, encodeString(k) .. ":" .. encode(v, true))
-                        end
-                    end
-                end
-                level = level - 1
-                
-                if pretty then
-                    if #parts > 0 then
-                        return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indentation() .. "}"
-                    else
-                        return "{}"
-                    end
-                else
-                    return "{" .. table.concat(parts, ",") .. "}"
-                end
-            end
-        else
-            error("Cannot encode " .. valType .. " to JSON")
-        end
+    s[#s + 1] = ']'
+  elseif kind == 'table' then
+    if as_key then error('Can\'t encode table as key.') end
+    s[#s + 1] = '{'
+    for k, v in pairs(obj) do
+      if #s > 1 then s[#s + 1] = ', ' end
+      s[#s + 1] = json.stringify(k, true)
+      s[#s + 1] = ':'
+      s[#s + 1] = json.stringify(v)
     end
-    
-    return encode(value)
+    s[#s + 1] = '}'
+  elseif kind == 'string' then
+    return '"' .. escape_str(obj) .. '"'
+  elseif kind == 'number' then
+    if as_key then return '"' .. tostring(obj) .. '"' end
+    return tostring(obj)
+  elseif kind == 'boolean' then
+    return tostring(obj)
+  elseif kind == 'nil' then
+    return 'null'
+  else
+    error('Unjsonifiable type: ' .. kind .. '.')
+  end
+  return table.concat(s)
+end
+
+json.null = {}  -- This is a one-off table to represent the null value.
+
+function json.parse(str, pos, end_delim)
+  pos = pos or 1
+  if pos > #str then error('Reached unexpected end of input.') end
+  local pos = pos + #str:match('^%s*', pos)  -- Skip whitespace.
+  local first = str:sub(pos, pos)
+  if first == '{' then  -- Parse an object.
+    local obj, key, delim_found = {}, true, true
+    pos = pos + 1
+    while true do
+      key, pos = json.parse(str, pos, '}')
+      if key == nil then return obj, pos end
+      if not delim_found then error('Comma missing between object items.') end
+      pos = skip_delim(str, pos, ':', true)  -- true -> error if missing.
+      obj[key], pos = json.parse(str, pos)
+      pos, delim_found = skip_delim(str, pos, ',')
+    end
+  elseif first == '[' then  -- Parse an array.
+    local arr, val, delim_found = {}, true, true
+    pos = pos + 1
+    while true do
+      val, pos = json.parse(str, pos, ']')
+      if val == nil then return arr, pos end
+      if not delim_found then error('Comma missing between array items.') end
+      arr[#arr + 1] = val
+      pos, delim_found = skip_delim(str, pos, ',')
+    end
+  elseif first == '"' then  -- Parse a string.
+    return parse_str_val(str, pos + 1)
+  elseif first == '-' or first:match('%d') then  -- Parse a number.
+    return parse_num_val(str, pos)
+  elseif first == end_delim then  -- End of an object or array.
+    return nil, pos + 1
+  else  -- Parse true, false, or null.
+    local literals = {['true'] = true, ['false'] = false, ['null'] = json.null}
+    for lit_str, lit_val in pairs(literals) do
+      local lit_end = pos + #lit_str - 1
+      if str:sub(pos, lit_end) == lit_str then return lit_val, lit_end + 1 end
+    end
+    local pos_info_str = 'position ' .. pos .. ': ' .. str:sub(pos, pos + 10)
+    error('Invalid json syntax starting at ' .. pos_info_str)
+  end
 end
 
 return json
