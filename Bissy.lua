@@ -1,21 +1,25 @@
 local addonName, addon = ...
 
 -- Initialize saved variables
-addon.db = BissyDB or {}
-BissyDB = addon.db
+local db = BissyDB or {}
+BissyDB = db
+
+-- Visibility state
+local isShown = false
 
 -- Initialize character data
-addon.db.primary = addon.db.primary or {}
-addon.db.secondary = addon.db.secondary or {}
-addon.currentSet = addon.currentSet or "primary"
+db.primary = db.primary or {}
+db.secondary = db.secondary or {}
+db.currentSet = db.currentSet or "primary"  -- Initialize currentSet
+local currentSet = db.currentSet  -- Load the setting
 
 -- Store item IDs for tooltip integration
-addon.primaryItems = {}
-addon.secondaryItems = {}
+local primaryItems = {}
+local secondaryItems = {}
 
 -- Debug function - only output in debug mode
 local DEBUG_MODE = false
-function addon:Debug(...)
+local function Debug(...)
     if DEBUG_MODE and DEFAULT_CHAT_FRAME then
         DEFAULT_CHAT_FRAME:AddMessage("Bissy Debug: " .. string.format(...), 0.5, 0.5, 1)
     end
@@ -24,7 +28,7 @@ end
 -- Create main frame
 local Bissy = CreateFrame("Frame", "Bissy", UIParent, "PortraitFrameTemplate")
 Bissy:Hide()
-Bissy:SetSize(370, 500)
+Bissy:SetSize(430, 550)  -- Increased width to accommodate slots on both sides
 Bissy:SetPoint("CENTER")
 Bissy:SetMovable(true)
 Bissy:EnableMouse(true)
@@ -35,7 +39,7 @@ Bissy:SetScript("OnDragStop", function(self)
     
     -- Save position
     local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint()
-    addon.db.position = {
+    db.position = {
         point = point,
         relativeTo = relativeTo and relativeTo:GetName() or nil,
         relativePoint = relativePoint,
@@ -44,157 +48,10 @@ Bissy:SetScript("OnDragStop", function(self)
     }
 end)
 Bissy:SetClampedToScreen(true)
-Bissy:SetTitle("Bissy (Primary)")
+Bissy:SetTitle("Bissy")
 
--- Add set switcher buttons
--- Primary button
-addon.primaryBtn = CreateFrame("Button", nil, Bissy, "UIPanelButtonTemplate")
-addon.primaryBtn:SetText("Primary")
-addon.primaryBtn:SetSize(80, 22)
-addon.primaryBtn:SetPoint("TOP", 0, -35)
-addon.primaryBtn:SetPoint("RIGHT", Bissy, "CENTER", -2, 0)
-addon.primaryBtn:SetScript("OnClick", function()
-    addon.currentSet = "primary"
-    
-    -- Update the display if we have data
-    if addon.db.primary then
-        -- Clear all slots first
-        addon:ClearAllSlots()
-        
-        -- Process each item
-        for _, item in ipairs(addon.db.primary.items or {}) do
-            -- Map JSON slot name to WoW slot ID
-            local slotName = addon.SLOT_MAP[item.slot]
-            if slotName then
-                -- Get the slot
-                local slot = addon.slots[slotName]
-                if slot then
-                    -- Get item info
-                    local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
-                          itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
-                    
-                    if itemLink then
-                        slot.itemLink = itemLink
-                        slot.icon:SetTexture(itemTexture)
-                        slot.icon:Show()
-                        
-                        -- Set border color based on item quality
-                        if itemRarity > 1 then
-                            local r, g, b = GetItemQualityColor(itemRarity)
-                            slot.IconBorder:SetVertexColor(r, g, b)
-                            slot.IconBorder:Show()
-                        end
-                    end
-                end
-            end
-        end
-        
-        -- Update the character model
-        addon.UpdateCharacterModel()
-    else
-        -- Clear the display if no data
-        addon:ClearAllSlots()
-    end
-    
-    -- Update the frame title
-    addon:UpdateFrameTitle()
-    
-    -- Update button states
-    addon:UpdateButtonStates()
-end)
-
--- Secondary button
-addon.secondaryBtn = CreateFrame("Button", nil, Bissy, "UIPanelButtonTemplate")
-addon.secondaryBtn:SetText("Secondary")
-addon.secondaryBtn:SetSize(80, 22)
-addon.secondaryBtn:SetPoint("TOP", 0, -35)
-addon.secondaryBtn:SetPoint("LEFT", Bissy, "CENTER", 2, 0)
-addon.secondaryBtn:SetScript("OnClick", function()
-    addon.currentSet = "secondary"
-    
-    -- Update the display if we have data
-    if addon.db.secondary then
-        -- Clear all slots first
-        addon:ClearAllSlots()
-        
-        -- Process each item
-        for _, item in ipairs(addon.db.secondary.items or {}) do
-            -- Map JSON slot name to WoW slot ID
-            local slotName = addon.SLOT_MAP[item.slot]
-            if slotName then
-                -- Get the slot
-                local slot = addon.slots[slotName]
-                if slot then
-                    -- Get item info
-                    local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
-                          itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
-                    
-                    if itemLink then
-                        slot.itemLink = itemLink
-                        slot.icon:SetTexture(itemTexture)
-                        slot.icon:Show()
-                        
-                        -- Set border color based on item quality
-                        if itemRarity > 1 then
-                            local r, g, b = GetItemQualityColor(itemRarity)
-                            slot.IconBorder:SetVertexColor(r, g, b)
-                            slot.IconBorder:Show()
-                        end
-                    end
-                end
-            end
-        end
-        
-        -- Update the character model
-        addon.UpdateCharacterModel()
-    else
-        -- Clear the display if no data
-        addon:ClearAllSlots()
-    end
-    
-    -- Update the frame title
-    addon:UpdateFrameTitle()
-    
-    -- Update button states
-    addon:UpdateButtonStates()
-end)
-
--- Function to update button states based on current set
-function addon:UpdateButtonStates()
-    print(addon.currentSet)
-
-    -- Disable both buttons by default
-    addon.primaryBtn:SetEnabled(false)
-    addon.secondaryBtn:SetEnabled(false)
-    
-    -- Enable the appropriate buttons
-    if addon.currentSet == "primary" then
-        addon.secondaryBtn:SetEnabled(true)
-    else
-        addon.primaryBtn:SetEnabled(true)
-    end
-end
-
--- Call once to set initial state
-addon:UpdateButtonStates()
-
--- Set the portrait icon
-if Bissy.PortraitContainer and Bissy.PortraitContainer.portrait then
-    Bissy.PortraitContainer.portrait:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
-elseif Bissy.portrait then
-    Bissy.portrait:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
-end
-
--- Hide the divider line at the bottom if it exists
-if Bissy.Inset then
-    Bissy.Inset:Hide()
-end
-if Bissy.BottomInset then
-    Bissy.BottomInset:Hide()
-end
-
--- Map JSON slot names to WoW slot IDs
-addon.SLOT_MAP = {
+-- Define slot mapping from JSON format to WoW slot IDs
+local SLOT_MAP = {
     HEAD = "HeadSlot",
     NECK = "NeckSlot",
     SHOULDER = "ShoulderSlot",
@@ -230,40 +87,46 @@ addon.SLOT_MAP = {
     TABARD = "TabardSlot",
 }
 
--- Create character model
-local model = CreateFrame("DressUpModel", nil, Bissy)
-model:SetPoint("TOPLEFT", 22, -76)
-model:SetSize(231, 350)  -- Increased height from 320 to 350
-model:SetUnit("player")
-Bissy.model = model  -- Store the model in the Bissy frame for easy access
-
--- Define all equipment slots
+-- Define all equipment slots with positions matching standard WoW character sheet
 local SLOT_INFO = {
-    { name = "HeadSlot", x = 254, y = -76 },
-    { name = "NeckSlot", x = 254, y = -117 },
-    { name = "ShoulderSlot", x = 254, y = -158 },
-    { name = "BackSlot", x = 254, y = -199 },
-    { name = "ChestSlot", x = 254, y = -240 },
-    { name = "WristSlot", x = 254, y = -281 },
-    { name = "HandsSlot", x = 254, y = -322 },
-    { name = "WaistSlot", x = 254, y = -363 },
-    { name = "LegsSlot", x = 295, y = -76 },
-    { name = "FeetSlot", x = 295, y = -117 },
-    { name = "Finger0Slot", x = 295, y = -158 },
-    { name = "Finger1Slot", x = 295, y = -199 },
-    { name = "Trinket0Slot", x = 295, y = -240 },
-    { name = "Trinket1Slot", x = 295, y = -281 },
-    { name = "MainHandSlot", x = 295, y = -322 },
-    { name = "SecondaryHandSlot", x = 295, y = -363 },
-    { name = "RangedSlot", x = 254, y = -404 },
-    { name = "ShirtSlot", x = 295, y = -404 },
+    -- Left column
+    { name = "HeadSlot", x = 75, y = -76 },
+    { name = "NeckSlot", x = 75, y = -117 },
+    { name = "ShoulderSlot", x = 75, y = -158 },
+    { name = "BackSlot", x = 75, y = -199 },
+    { name = "ChestSlot", x = 75, y = -240 },
+    { name = "ShirtSlot", x = 75, y = -281 },
+    { name = "TabardSlot", x = 75, y = -322 },
+    { name = "WristSlot", x = 75, y = -363 },
+    
+    -- Right column
+    { name = "HandsSlot", x = 340, y = -76 },
+    { name = "WaistSlot", x = 340, y = -117 },
+    { name = "LegsSlot", x = 340, y = -158 },
+    { name = "FeetSlot", x = 340, y = -199 },
+    { name = "Finger0Slot", x = 340, y = -240 },
+    { name = "Finger1Slot", x = 340, y = -281 },
+    { name = "Trinket0Slot", x = 340, y = -322 },
+    { name = "Trinket1Slot", x = 340, y = -363 },
+    
+    -- Weapons row (below model)
+    { name = "MainHandSlot", x = 150, y = -430 },
+    { name = "SecondaryHandSlot", x = 215, y = -430 },
+    { name = "RangedSlot", x = 280, y = -430 },
 }
 
 -- Create item slots
 local slots = {}
 local function CreateItemSlot(info)
-    local slot = CreateFrame("Button", nil, Bissy, "ItemButtonTemplate")
+    Debug("Creating slot: %s", info.name)
+    
+    -- Create a button using the standard ItemButtonTemplate
+    local slot = CreateFrame("Button", "BissySlot_" .. info.name, Bissy, "ItemButtonTemplate")
+    slot:SetSize(37, 37)  -- Standard item slot size
     slot:SetPoint("TOPLEFT", info.x, info.y)
+    slot:EnableMouse(true)
+    
+    -- Add tooltip functionality
     slot:SetScript("OnEnter", function(self)
         if self.itemLink then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -278,6 +141,16 @@ local function CreateItemSlot(info)
     slot:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
+    
+    -- Add a click handler
+    slot:SetScript("OnClick", function(self)
+        if self.itemLink then
+            Debug("Clicked on item: %s", self.itemLink)
+        else
+            Debug("Clicked on empty slot: %s", info.name)
+        end
+    end)
+    
     return slot
 end
 
@@ -285,11 +158,198 @@ for i, info in ipairs(SLOT_INFO) do
     slots[info.name] = CreateItemSlot(info)
 end
 
--- Store the slots in the addon
-addon.slots = slots
+-- Forward declarations for functions we'll define later
+local ClearAllSlots
+local UpdateCharacterModel
+
+-- CENTRALIZED SET SWITCHING FUNCTION
+local function SwitchSet(setName)
+    -- Validate the set name
+    if setName ~= "primary" and setName ~= "secondary" then
+        print("Bissy: Invalid set name: " .. tostring(setName))
+        return false
+    end
+    
+    -- Update the current set
+    currentSet = setName
+    db.currentSet = setName  -- Save the setting
+    
+    -- Update the frame title
+    Bissy:SetTitle("Bissy (" .. (setName == "primary" and "Primary" or "Secondary") .. ")")
+    
+    print("Switching to " .. setName .. " set")
+
+    -- Only proceed with UI updates if the frame is shown
+    if isShown then
+        print("Updating UI with switched set")
+        
+        -- Clear all slots first
+        ClearAllSlots()
+        
+        -- Get the current set data
+        local currentData = db[setName]
+        
+        -- Process each item if we have data
+        if currentData and currentData.items and #currentData.items > 0 then
+            print("Displaying " .. #currentData.items .. " items for " .. setName .. " set")
+            
+            -- Pre-load item data for all items
+            for _, item in ipairs(currentData.items) do
+                local itemId = tonumber(item.id)
+                if itemId then
+                    -- Use C_Item.RequestLoadItemDataByID if available (retail WoW)
+                    if C_Item and C_Item.RequestLoadItemDataByID then
+                        C_Item.RequestLoadItemDataByID(itemId)
+                    end
+                end
+            end
+            
+            -- Process each item for display
+            for _, item in ipairs(currentData.items) do
+                local itemId = tonumber(item.id)
+                if not itemId then
+                    print("Invalid item ID: " .. tostring(item.id))
+                else
+                    -- Map JSON slot name to WoW slot ID
+                    local slotName = SLOT_MAP[item.slot]
+                    
+                    if slotName and slots[slotName] then
+                        local slot = slots[slotName]
+                        
+                        -- Get item info
+                        local itemName, itemLink, itemRarity, _, _, _, _, _, _, itemTexture = GetItemInfo(itemId)
+                        
+                        -- If item info isn't available yet, use GetItemInfoInstant as fallback
+                        if not itemLink then
+                            local name, _, _, _, _, _, _, _, _, texture = GetItemInfoInstant(itemId)
+                            if name then
+                                itemLink = "item:" .. itemId .. ":0:0:0:0:0:0:0"
+                                itemName = name
+                                itemTexture = texture
+                                itemRarity = 1  -- Common quality as fallback
+                            else
+                                -- Use placeholder if no item info is available
+                                itemLink = "item:" .. itemId .. ":0:0:0:0:0:0:0"
+                                itemName = item.name or ("Item " .. itemId)
+                                itemTexture = "Interface\\Icons\\INV_Misc_QuestionMark"
+                                itemRarity = 1
+                            end
+                        end
+                        
+                        -- Set item data to slot
+                        if itemLink then
+                            slot.itemLink = itemLink
+                            
+                            -- Set texture using ItemButtonTemplate methods
+                            if not itemTexture then
+                                itemTexture = "Interface\\Icons\\INV_Misc_QuestionMark"
+                            end
+                            
+                            -- Set the icon texture
+                            SetItemButtonTexture(slot, itemTexture)
+                            
+                            -- Set border color based on item quality
+                            if itemRarity then
+                                SetItemButtonQuality(slot, itemRarity, itemLink)
+                            end
+                            
+                            -- Store item ID for tooltip integration
+                            if setName == "primary" then
+                                primaryItems[slotName] = itemId
+                            else
+                                secondaryItems[slotName] = itemId
+                            end
+                        end
+                    else
+                        print("Invalid slot mapping: " .. item.slot)
+                    end
+                end
+            end
+            
+            -- Update the character model
+            UpdateCharacterModel()
+        else
+            print("No items found for " .. setName .. " set")
+        end
+    end
+    
+    -- Update button states
+    if primaryBtn and secondaryBtn then
+        if setName == "primary" then
+            primaryBtn:SetEnabled(false)
+            secondaryBtn:SetEnabled(true)
+        else
+            primaryBtn:SetEnabled(true)
+            secondaryBtn:SetEnabled(false)
+        end
+    end
+    
+    return true
+end
+
+-- Primary button
+local primaryBtn = CreateFrame("Button", nil, Bissy, "UIPanelButtonTemplate")
+primaryBtn:SetText("Primary")
+primaryBtn:SetSize(80, 22)
+primaryBtn:SetPoint("TOP", 0, -35)
+primaryBtn:SetPoint("RIGHT", Bissy, "CENTER", -2, 0)
+primaryBtn:SetScript("OnClick", function()
+    SwitchSet("primary")
+end)
+
+-- Secondary button
+local secondaryBtn = CreateFrame("Button", nil, Bissy, "UIPanelButtonTemplate")
+secondaryBtn:SetText("Secondary")
+secondaryBtn:SetSize(80, 22)
+secondaryBtn:SetPoint("TOP", 0, -35)
+secondaryBtn:SetPoint("LEFT", Bissy, "CENTER", 2, 0)
+secondaryBtn:SetScript("OnClick", function()
+    SwitchSet("secondary")
+end)
+
+-- Set the initial button states
+C_Timer.After(0.1, function()
+    SwitchSet(currentSet)
+end)
+
+-- Set the portrait icon
+if Bissy.PortraitContainer and Bissy.PortraitContainer.portrait then
+    Bissy.PortraitContainer.portrait:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
+elseif Bissy.portrait then
+    Bissy.portrait:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
+end
+
+-- Hide the divider line at the bottom if it exists
+if Bissy.Inset then
+    Bissy.Inset:Hide()
+end
+if Bissy.BottomInset then
+    Bissy.BottomInset:Hide()
+end
+
+-- Create character model
+local model = CreateFrame("DressUpModel", nil, Bissy)
+model:SetPoint("TOPLEFT", 130, -76)
+model:SetSize(170, 320)  -- Adjusted size to better match character sheet
+model:SetUnit("player")
+Bissy.model = model  -- Store the model in the Bissy frame for easy access
+
+-- Add equipment section titles
+local leftTitle = Bissy:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+leftTitle:SetPoint("TOPLEFT", 75, -50)
+leftTitle:SetText("Armor")
+
+local rightTitle = Bissy:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+rightTitle:SetPoint("TOPLEFT", 340, -50)
+rightTitle:SetText("Accessories")
+
+-- Add weapons section title
+local weaponsTitle = Bissy:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+weaponsTitle:SetPoint("TOPLEFT", 190, -405)
+weaponsTitle:SetText("Weapons")
 
 -- Function to update the character model with equipped items
-local function UpdateCharacterModel()
+function UpdateCharacterModel()
     -- Reset the model
     model:Undress()
     
@@ -300,130 +360,72 @@ local function UpdateCharacterModel()
             -- Try to extract item ID from item link
             local itemID = slot.itemLink:match("item:(%d+)")
             if itemID then
+                print("Bissy Debug: Trying on item ID: " .. itemID .. " for slot: " .. slotName)
                 model:TryOn(itemID)
+                itemCount = itemCount + 1
             else
+                print("Bissy Debug: Trying on item link: " .. slot.itemLink .. " for slot: " .. slotName)
                 model:TryOn(slot.itemLink)
+                itemCount = itemCount + 1
             end
-            
-            itemCount = itemCount + 1
         end
     end
+    
+    print("Bissy Debug: Updated character model with " .. itemCount .. " items")
     
     -- Force model to update
     model:RefreshCamera()
     model:SetModelScale(1.0)
 end
 
--- Make the function available to the addon
-addon.UpdateCharacterModel = UpdateCharacterModel
-
 -- Function to clear all item slots
-function addon:ClearAllSlots()
-    for _, slot in pairs(addon.slots) do
+function ClearAllSlots()
+    print("Bissy Debug: Clearing all slots")
+    for slotName, slot in pairs(slots) do
         slot.itemLink = nil
-        slot.icon:Hide()
-        slot.IconBorder:Hide()
+        
+        -- Clear the icon texture
+        SetItemButtonTexture(slot, "")
+        
+        -- Clear the border color
+        SetItemButtonQuality(slot, 0, "")
+    end
+    
+    -- Also reset the model
+    if Bissy.model then
+        Bissy.model:Undress()
+        Bissy.model:RefreshCamera()
     end
 end
 
--- Set up a hook to restore data when frame is shown
+-- Function to check the visibility of all slots
+function DebugCheckSlots()
+    Debug("Checking visibility of all slots")
+    for slotName, slot in pairs(slots) do
+        Debug("Slot: %s", slotName)
+        Debug("  - Has itemLink: %s", (slot.itemLink and "Yes" or "No"))
+        Debug("  - Icon texture: %s", (slot.icon:GetTexture() and "Yes" or "No"))
+    end
+end
+
+-- Store the original OnShow handler if it exists
 local originalOnShow = Bissy:GetScript("OnShow")
+
+-- Set up the OnShow handler
 Bissy:SetScript("OnShow", function(self)
     -- Call original OnShow if it exists
     if originalOnShow then
         originalOnShow(self)
     end
     
-    -- Restore imported data for current set
-    if addon.currentSet == "primary" and addon.db.primary then
-        -- Clear all slots first
-        addon:ClearAllSlots()
-        
-        -- Process each item
-        for _, item in ipairs(addon.db.primary.items or {}) do
-            -- Map JSON slot name to WoW slot ID
-            local slotName = addon.SLOT_MAP[item.slot]
-            if slotName then
-                -- Get the slot
-                local slot = addon.slots[slotName]
-                if slot then
-                    -- Get item info
-                    local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
-                          itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
-                    
-                    if itemLink then
-                        slot.itemLink = itemLink
-                        slot.icon:SetTexture(itemTexture)
-                        slot.icon:Show()
-                        
-                        -- Set border color based on item quality
-                        if itemRarity > 1 then
-                            local r, g, b = GetItemQualityColor(itemRarity)
-                            slot.IconBorder:SetVertexColor(r, g, b)
-                            slot.IconBorder:Show()
-                        end
-                    end
-                end
-            end
-        end
-        
-        -- Update the character model
-        addon.UpdateCharacterModel()
-    elseif addon.currentSet == "secondary" and addon.db.secondary then
-        -- Clear all slots first
-        addon:ClearAllSlots()
-        
-        -- Process each item
-        for _, item in ipairs(addon.db.secondary.items or {}) do
-            -- Map JSON slot name to WoW slot ID
-            local slotName = addon.SLOT_MAP[item.slot]
-            if slotName then
-                -- Get the slot
-                local slot = addon.slots[slotName]
-                if slot then
-                    -- Get item info
-                    local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
-                          itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
-                    
-                    if itemLink then
-                        slot.itemLink = itemLink
-                        slot.icon:SetTexture(itemTexture)
-                        slot.icon:Show()
-                        
-                        -- Set border color based on item quality
-                        if itemRarity > 1 then
-                            local r, g, b = GetItemQualityColor(itemRarity)
-                            slot.IconBorder:SetVertexColor(r, g, b)
-                            slot.IconBorder:Show()
-                        end
-                    end
-                end
-            end
-        end
-        
-        -- Update the character model
-        addon.UpdateCharacterModel()
-    else
-        -- Clear all slots if no data
-        addon:ClearAllSlots()
-    end
-    
-    -- Update the frame title
-    addon:UpdateFrameTitle()
-    
-    -- Update button states
-    addon:UpdateButtonStates()
+    -- Use our centralized SwitchSet function to refresh the UI
+    -- This will handle loading items, updating the title, and button states
+    SwitchSet(currentSet)
 end)
 
--- Show the frame
--- Bissy:SetScript("OnShow", function()
---     -- Update the character model when the frame is shown
---     addon.UpdateCharacterModel()
--- end)
-
 -- Import dialog
-function addon:ShowImportDialog()
-    if not addon.importDialog then
+function ShowImportDialog()
+    if not importDialog then
         -- Create a very simple frame
         local dialog = CreateFrame("Frame", "BissyImportDialog", UIParent)
         dialog:SetSize(500, 300)
@@ -433,7 +435,9 @@ function addon:ShowImportDialog()
         dialog:SetMovable(true)
         dialog:RegisterForDrag("LeftButton")
         dialog:SetScript("OnDragStart", dialog.StartMoving)
-        dialog:SetScript("OnDragStop", dialog.StopMovingOrSizing)
+        dialog:SetScript("OnDragStop", function(self)
+            self:StopMovingOrSizing()
+        end)
         
         -- Simple background
         local bg = dialog:CreateTexture(nil, "BACKGROUND")
@@ -517,9 +521,24 @@ function addon:ShowImportDialog()
         importBtn:SetScript("OnClick", function()
             local jsonStr = dialog.editBox:GetText()
             if not jsonStr or jsonStr == "" then
+                print("Bissy: No data to import")
                 return
             end
             
+            print("Bissy: Attempting to parse JSON data")
+            
+            -- Try to use the json.lua library if available
+            if json and json.decode then
+                local success, result = pcall(function() return json.decode(jsonStr) end)
+                if success and result and result.items then
+                    print("Bissy: Successfully parsed JSON with library")
+                    ProcessImportedData(result)
+                    dialog:Hide()
+                    return
+                end
+            end
+            
+            -- Fallback to manual parsing if json library failed or isn't available
             local data = {
                 name = "Imported Character",
                 items = {}
@@ -529,18 +548,23 @@ function addon:ShowImportDialog()
             local name = jsonStr:match('"name"%s*:%s*"([^"]+)"')
             if name then
                 data.name = name
+                print("Bissy: Found character name: " .. name)
             end
+            
+            -- Count of items found
+            local itemCount = 0
             
             -- Extract items with a simpler approach
             local itemPattern = '{"id":%s*(%d+)%s*,%s*"name":%s*"([^"]+)"%s*,%s*"slot":%s*"([^"]+)"}'
             for id, name, slot in string.gmatch(jsonStr, itemPattern) do
                 -- Check if the slot is valid
-                if addon.SLOT_MAP[slot] then
+                if SLOT_MAP[slot] then
                     table.insert(data.items, {
                         id = tonumber(id),
                         name = name,
                         slot = slot
                     })
+                    itemCount = itemCount + 1
                 end
             end
             
@@ -548,12 +572,13 @@ function addon:ShowImportDialog()
             if #data.items == 0 then
                 for id, name, slot in string.gmatch(jsonStr, '"id"%s*:%s*(%d+).-"name"%s*:%s*"([^"]+)".-"slot"%s*:%s*"([^"]+)"') do
                     -- Check if the slot is valid
-                    if addon.SLOT_MAP[slot] then
+                    if SLOT_MAP[slot] then
                         table.insert(data.items, {
                             id = tonumber(id),
                             name = name,
                             slot = slot
                         })
+                        itemCount = itemCount + 1
                     end
                 end
             end
@@ -566,12 +591,13 @@ function addon:ShowImportDialog()
                     -- Try a very simple pattern that just looks for IDs and slots
                     for id, slot in string.gmatch(itemsSection, '"id"%s*:%s*(%d+).-"slot"%s*:%s*"([^"]+)"') do
                         -- Check if the slot is valid
-                        if addon.SLOT_MAP[slot] then
+                        if SLOT_MAP[slot] then
                             table.insert(data.items, {
                                 id = tonumber(id),
                                 name = "Item " .. id,  -- Use a placeholder name
                                 slot = slot
                             })
+                            itemCount = itemCount + 1
                         end
                     end
                 end
@@ -579,8 +605,11 @@ function addon:ShowImportDialog()
             
             -- Process the data
             if #data.items > 0 then
-                addon:ProcessImportedData(data)
+                print("Bissy: Found " .. itemCount .. " items in imported data")
+                ProcessImportedData(data)
                 dialog:Hide()
+            else
+                print("Bissy: No items found in JSON data. Please check format.")
             end
         end)
         
@@ -593,10 +622,10 @@ function addon:ShowImportDialog()
             dialog:Hide()
         end)
         
-        addon.importDialog = dialog
+        importDialog = dialog
     end
     
-    addon.importDialog:Show()
+    importDialog:Show()
 end
 
 -- Create button on character frame
@@ -605,10 +634,12 @@ openButton:SetText("Bissy")
 openButton:SetSize(80, 22)
 openButton:SetPoint("TOPRIGHT", CharacterFrame, "TOPRIGHT", -25, -25)
 openButton:SetScript("OnClick", function()
-    if Bissy:IsShown() then
+    if isShown then
         Bissy:Hide()
+        isShown = false
     else
         Bissy:Show()
+        isShown = true
     end
 end)
 
@@ -618,7 +649,7 @@ importButton:SetText("Import Sheet")
 importButton:SetSize(100, 22)
 importButton:SetPoint("BOTTOMRIGHT", -10, 4)
 importButton:SetScript("OnClick", function()
-    addon:ShowImportDialog()
+    ShowImportDialog()
 end)
 
 -- Make the frame movable
@@ -631,7 +662,7 @@ Bissy:SetScript("OnDragStop", function(self)
     
     -- Save position
     local point, relativeTo, relativePoint, x, y = self:GetPoint()
-    addon.db.position = {
+    db.position = {
         point = point,
         relativeTo = relativeTo,
         relativePoint = relativePoint,
@@ -640,347 +671,188 @@ Bissy:SetScript("OnDragStop", function(self)
     }
 end)
 
--- Function to update the frame title based on the current set
-function addon:UpdateFrameTitle()
-    if addon.currentSet == "primary" then
-        Bissy:SetTitle("Bissy (Primary)")
-    else
-        Bissy:SetTitle("Bissy (Secondary)")
-    end
-end
-
 -- Process imported data
-function addon:ProcessImportedData(data)
-    -- Save the data to the current set
-    if addon.currentSet == "primary" then
-        addon.db.primary = data
-        -- Update primary items array for tooltip integration
-        addon.primaryItems = {}
-        for _, item in ipairs(data.items) do
-            table.insert(addon.primaryItems, item.id)
-        end
-    elseif addon.currentSet == "secondary" then
-        addon.db.secondary = data
-        -- Update secondary items array for tooltip integration
-        addon.secondaryItems = {}
-        for _, item in ipairs(data.items) do
-            table.insert(addon.secondaryItems, item.id)
-        end
+function ProcessImportedData(data)
+    print("Bissy Debug: Processing imported data")
+    
+    -- Validate data structure
+    if not data or type(data) ~= "table" then
+        print("Bissy Debug: Invalid data format - not a table")
+        return false
     end
     
-    -- Check if we have items
-    if not data.items then
+    if not data.items or type(data.items) ~= "table" or #data.items == 0 then
+        print("Bissy Debug: Invalid data format - no items array or empty items array")
+        return false
+    end
+    
+    -- Debug: Print the imported data structure
+    print("Bissy Debug: Imported data structure:")
+    print("  Name: " .. (data.name or "Unknown"))
+    print("  Items: " .. #data.items)
+    
+    -- Validate each item
+    for i, item in ipairs(data.items) do
+        if not item.id or not item.slot then
+            print("Bissy Debug: Invalid item at index " .. i .. " - missing id or slot")
+            return false
+        end
+        
+        -- Ensure item ID is a number
+        item.id = tonumber(item.id)
+        if not item.id then
+            print("Bissy Debug: Invalid item ID at index " .. i)
+            return false
+        end
+        
+        -- Debug: Print item details
+        print("Bissy Debug: Item " .. i .. " - ID: " .. item.id .. ", Slot: " .. item.slot)
+    end
+    
+    -- Save to current set
+    local currentSetName = currentSet
+    print("Bissy Debug: Saving to current set: " .. currentSetName)
+    
+    if currentSetName == "primary" then
+        db.primary = data
+    elseif currentSetName == "secondary" then
+        db.secondary = data
+    else
+        print("Bissy Debug: Invalid current set: " .. tostring(currentSetName))
+        return false
+    end
+    
+    -- Update the UI if the frame is shown
+    if isShown then
+        print("Bissy Debug: Updating UI with imported data")
+        SwitchSet(currentSetName)
+    end
+    
+    -- Dump database for debugging
+    DumpDatabase()
+    
+    return true
+end
+
+-- Function to dump the database contents for debugging
+function DumpDatabase()
+    print("Bissy Debug: Dumping database contents")
+    
+    -- Check if we have a database
+    if not db then
+        print("Bissy Debug: No database found")
         return
     end
     
-    -- Clear all slots first
-    addon:ClearAllSlots()
-    
-    -- Process each item
-    for _, item in ipairs(data.items) do
-        -- Map JSON slot name to WoW slot ID
-        local slotName = addon.SLOT_MAP[item.slot]
-        if not slotName then
-            -- Skip unknown slots
-        else
-            -- Get the slot
-            local slot = addon.slots[slotName]
-            if not slot then
-                -- Skip missing slots
-            else
-                -- Get item info
-                local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
-                      itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
-                
-                if not itemLink then
-                    -- Try to get item info via GetItemInfoInstant
-                    local name, _, _, _, _, _, _, _, _, texture = GetItemInfoInstant(item.id)
-                    if name then
-                        -- We have some basic info, but not the full item link
-                        -- Use a placeholder link for now
-                        itemLink = "item:" .. item.id .. ":0:0:0:0:0:0:0"
-                        itemName = name
-                        itemTexture = texture
-                    end
-                end
-                
-                -- Only set the item if we have a valid itemLink
-                if itemLink then
-                    -- Set the item
-                    slot.itemLink = itemLink
-                    slot.icon:SetTexture(itemTexture)
-                    slot.icon:Show()
-                    
-                    -- Set border color based on item quality
-                    if itemRarity and itemRarity > 1 then
-                        local r, g, b = GetItemQualityColor(itemRarity)
-                        slot.IconBorder:SetVertexColor(r, g, b)
-                        slot.IconBorder:Show()
-                    end
-                end
-            end
+    -- Check primary set
+    if db.primary and db.primary.items then
+        print("Bissy Debug: Primary set has " .. #db.primary.items .. " items")
+        for i, item in ipairs(db.primary.items) do
+            print(string.format("  Item %d: ID=%s, Name=%s, Slot=%s", 
+                i, tostring(item.id), tostring(item.name), tostring(item.slot)))
         end
-    end
-    
-    -- Update the character model
-    addon.UpdateCharacterModel()
-    
-    -- Update the frame title
-    addon:UpdateFrameTitle()
-    
-    -- Update button states
-    addon:UpdateButtonStates()
-end
-
--- Function to initialize the addon
-function addon:OnInitialize()
-    -- Restore position if saved
-    if addon.db.position then
-        local pos = addon.db.position
-        Bissy:ClearAllPoints()
-        Bissy:SetPoint(pos.point, pos.relativeTo, pos.relativePoint, pos.x, pos.y)
-    end
-    
-    -- Load primary and secondary items
-    if addon.db.primary and addon.db.primary.items then
-        for _, item in ipairs(addon.db.primary.items) do
-            table.insert(addon.primaryItems, item.id)
-        end
-    end
-    
-    if addon.db.secondary and addon.db.secondary.items then
-        for _, item in ipairs(addon.db.secondary.items) do
-            table.insert(addon.secondaryItems, item.id)
-        end
-    end
-end
-
--- Handle slash commands
-function addon:HandleSlashCommand(msg)
-    local command, rest = msg:match("^(%S*)%s*(.-)$")
-    command = command:lower()
-    
-    if command == "show" or command == "" then
-        -- Toggle visibility
-        if Bissy:IsShown() then
-            Bissy:Hide()
-        else
-            Bissy:Show()
-        end
-    elseif command == "reset" then
-        -- Reset position
-        Bissy:ClearAllPoints()
-        Bissy:SetPoint("CENTER")
-        addon.db.position = nil
-        print("Bissy: Position reset")
-    elseif command == "test" then
-        -- Test JSON parsing with a simple JSON string
-        local testJson = [[
-{
-  "name": "Test Character",
-  "items": [
-    {"id": 12345, "name": "Test Head Item", "slot": "HEAD"},
-    {"id": 12346, "name": "Test Neck Item", "slot": "NECK"},
-    {"id": 12347, "name": "Test Shoulder Item", "slot": "SHOULDER"}
-  ]
-}
-]]
-        local success, result = addon:TestJSONParse(testJson)
-        if success then
-            print("Bissy: JSON test successful!")
-            print("Character name: " .. (result.name or "Unknown"))
-            print("Items: " .. (result.items and #result.items or 0))
-        else
-            print("Bissy: JSON test failed: " .. tostring(result))
-        end
-    elseif command == "directtest" then
-        -- Run the direct parse test
-        addon:TestDirectParse()
-    elseif command == "import" then
-        addon:ShowImportDialog()
-    elseif command == "primary" then
-        -- Switch to primary set
-        addon.currentSet = "primary"
-        print("Bissy: Switched to primary character set")
-        
-        -- Update button states
-        addon:UpdateButtonStates()
-        
-        -- Update if frame is shown
-        if Bissy:IsShown() then
-            if addon.db.primary then
-                -- Clear all slots first
-                addon:ClearAllSlots()
-                
-                -- Process each item
-                for _, item in ipairs(addon.db.primary.items or {}) do
-                    -- Map JSON slot name to WoW slot ID
-                    local slotName = addon.SLOT_MAP[item.slot]
-                    if slotName then
-                        -- Get the slot
-                        local slot = addon.slots[slotName]
-                        if slot then
-                            -- Get item info
-                            local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
-                                  itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
-                            
-                            if itemLink then
-                                slot.itemLink = itemLink
-                                slot.icon:SetTexture(itemTexture)
-                                slot.icon:Show()
-                                
-                                -- Set border color based on item quality
-                                if itemRarity > 1 then
-                                    local r, g, b = GetItemQualityColor(itemRarity)
-                                    slot.IconBorder:SetVertexColor(r, g, b)
-                                    slot.IconBorder:Show()
-                                end
-                            end
-                        end
-                    end
-                end
-                
-                -- Update the character model
-                addon.UpdateCharacterModel()
-            else
-                -- Clear the display if no data
-                addon:ClearAllSlots()
-            end
-            
-            -- Update the frame title
-            addon:UpdateFrameTitle()
-        end
-    elseif command == "secondary" then
-        -- Switch to secondary set
-        addon.currentSet = "secondary"
-        print("Bissy: Switched to secondary character set")
-        
-        -- Update button states
-        addon:UpdateButtonStates()
-        
-        -- Update if frame is shown
-        if Bissy:IsShown() then
-            if addon.db.secondary then
-                -- Clear all slots first
-                addon:ClearAllSlots()
-                
-                -- Process each item
-                for _, item in ipairs(addon.db.secondary.items or {}) do
-                    -- Map JSON slot name to WoW slot ID
-                    local slotName = addon.SLOT_MAP[item.slot]
-                    if slotName then
-                        -- Get the slot
-                        local slot = addon.slots[slotName]
-                        if slot then
-                            -- Get item info
-                            local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, 
-                                  itemSubType, itemStackCount, itemEquipLoc, itemTexture = GetItemInfo(item.id)
-                            
-                            if itemLink then
-                                slot.itemLink = itemLink
-                                slot.icon:SetTexture(itemTexture)
-                                slot.icon:Show()
-                                
-                                -- Set border color based on item quality
-                                if itemRarity > 1 then
-                                    local r, g, b = GetItemQualityColor(itemRarity)
-                                    slot.IconBorder:SetVertexColor(r, g, b)
-                                    slot.IconBorder:Show()
-                                end
-                            end
-                        end
-                    end
-                end
-                
-                -- Update the character model
-                addon.UpdateCharacterModel()
-            else
-                -- Clear the display if no data
-                addon:ClearAllSlots()
-            end
-            
-            -- Update the frame title
-            addon:UpdateFrameTitle()
-        end
-    elseif command == "resetdata" then
-        -- Reset all stored data
-        addon.db.primary = nil
-        addon.db.secondary = nil
-        addon.db.importedData = nil  -- Clear legacy data format
-        print("Bissy: All stored character data has been reset.")
-        
-        -- Clear the display if frame is shown
-        if Bissy:IsShown() then
-            addon:ClearAllSlots()
-            addon:UpdateFrameTitle()
-        end
-    elseif command == "resetprimary" then
-        -- Reset primary data
-        addon.db.primary = nil
-        print("Bissy: Primary character data has been reset.")
-        
-        -- Clear the display if frame is shown and on primary
-        if Bissy:IsShown() and addon.currentSet == "primary" then
-            addon:ClearAllSlots()
-            addon:UpdateFrameTitle()
-        end
-    elseif command == "resetsecondary" then
-        -- Reset secondary data
-        addon.db.secondary = nil
-        print("Bissy: Secondary character data has been reset.")
-        
-        -- Clear the display if frame is shown and on secondary
-        if Bissy:IsShown() and addon.currentSet == "secondary" then
-            addon:ClearAllSlots()
-            addon:UpdateFrameTitle()
-        end
-    elseif command == "help" then
-        print("Bissy commands:")
-        print("  /bissy - Toggle the Bissy frame")
-        print("  /bissy reset - Reset the frame position")
-        print("  /bissy import - Show the import dialog")
-        print("  /bissy test - Test the addon")
-        print("  /bissy directtest - Run the direct parse test")
-        print("  /bissy primary - Switch to primary character set")
-        print("  /bissy secondary - Switch to secondary character set")
-        print("  /bissy resetdata - Reset all stored character data")
-        print("  /bissy resetprimary - Reset primary character data")
-        print("  /bissy resetsecondary - Reset secondary character data")
-        print("  /bissy help - Show this help message")
     else
-        Bissy:SetShown(not Bissy:IsShown())
+        print("Bissy Debug: No primary set found or it has no items")
     end
+    
+    -- Check secondary set
+    if db.secondary and db.secondary.items then
+        print("Bissy Debug: Secondary set has " .. #db.secondary.items .. " items")
+        for i, item in ipairs(db.secondary.items) do
+            print(string.format("  Item %d: ID=%s, Name=%s, Slot=%s", 
+                i, tostring(item.id), tostring(item.name), tostring(item.slot)))
+        end
+    else
+        print("Bissy Debug: No secondary set found or it has no items")
+    end
+    
+    -- Check current set
+    print("Bissy Debug: Current set is " .. (currentSet or "nil"))
 end
 
--- Add slash command
-SLASH_BISSY1 = "/bissy"
-SlashCmdList["BISSY"] = function(msg)
-    addon:HandleSlashCommand(msg)
+-- Function to verify and fix slot configuration
+local function VerifySlotConfiguration()
+    print("Bissy: Verifying slot configuration")
+    
+    -- Check if all slots exist
+    for _, info in ipairs(SLOT_INFO) do
+        if not slots[info.name] then
+            print("Bissy: Missing slot: " .. info.name)
+            -- Create the slot
+            slots[info.name] = CreateItemSlot(info)
+        end
+    end
+    
+    print("Bissy: Slot configuration verified")
+end
+
+-- Add the function to the addon for slash command access
+addon.VerifySlotConfiguration = VerifySlotConfiguration
+
+-- Add a debug command to dump the database
+SLASH_BISSYDEBUG1 = "/bissydebug"
+SlashCmdList["BISSYDEBUG"] = function(msg)
+    if msg == "dump" then
+        DumpDatabase()
+    elseif msg == "reload" then
+        -- Force a reload of the current set
+        if currentSet then
+            SwitchSet(currentSet)
+        else
+            print("Bissy Debug: No current set")
+        end
+    elseif msg == "checkslots" then
+        DebugCheckSlots()
+    elseif msg == "shown" then
+        if Bissy:IsVisible() then
+            print("Bissy Debug: Bissy is shown")
+        else
+            print("Bissy Debug: Bissy is not shown")
+        end
+    else
+        print("Bissy Debug: Available commands:")
+        print("  /bissydebug dump - Dump database contents")
+        print("  /bissydebug reload - Reload current set")
+        print("  /bissydebug checkslots - Check slot visibility")
+        print("  /bissyverifyslots - Verify and fix slot configuration")
+        print("  /bissytestitemslot - Test different item slot creation methods")
+        print("  /bissytestgetitemicon - Test GetItemIcon functionality")
+        print("  /bissydirecttest - Create a direct test frame")
+    end
 end
 
 -- Event handler
 local function OnEvent(self, event, ...)
-    if event == "ADDON_LOADED" and ... == "Bissy" then
+    if event == "ADDON_LOADED" and ... == addonName then
         print("Bissy: Addon loaded")
         
         -- Initialize the addon
-        addon.db = BissyDB or {}
-        BissyDB = addon.db
-        
-        -- Set default character set
-        addon.currentSet = addon.currentSet or "primary"
-        print("Bissy: Addon loaded with current set: " .. addon.currentSet)
+        db = BissyDB or {}
+        BissyDB = db
         
         -- Initialize character sets if they don't exist
-        addon.db.primary = addon.db.primary or {}
-        addon.db.secondary = addon.db.secondary or {}
+        db.primary = db.primary or {}
+        db.secondary = db.secondary or {}
+        
+        -- Set default character set
+        db.currentSet = db.currentSet or "primary"
+        currentSet = db.currentSet
         
         -- Initialize item arrays
-        addon.primaryItems = {}
-        addon.secondaryItems = {}
+        primaryItems = {}
+        secondaryItems = {}
         
-        -- Call the initialize function
-        addon:OnInitialize()
+        -- Debug output
+        print("Bissy: Addon initialized")
+        print("Bissy: Current set is " .. currentSet)
+        
+        -- Dump database for debugging
+        DumpDatabase()
+        
+        -- Set the current set using our new function (with a slight delay to ensure UI is ready)
+        C_Timer.After(0.1, function()
+            SwitchSet(db.currentSet)
+        end)
     end
 end
 
@@ -989,3 +861,63 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGOUT")
 eventFrame:SetScript("OnEvent", OnEvent)
+
+-- Function to handle slash commands
+function HandleSlashCommand(msg)
+    msg = msg:lower()
+    
+    if msg == "show" then
+        Bissy:Show()
+    elseif msg == "hide" then
+        Bissy:Hide()
+    elseif msg == "reset" then
+        Bissy:ClearAllPoints()
+        Bissy:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    elseif msg == "primary" then
+        SwitchSet("primary")
+    elseif msg == "secondary" then
+        SwitchSet("secondary")
+    elseif msg == "import" then
+        ShowImportDialog()
+    elseif msg == "reload" then
+        -- Force a reload of the current set
+        if currentSet then
+            print("Bissy: Reloading current set: " .. currentSet)
+            SwitchSet(currentSet)
+        else
+            print("Bissy: No current set to reload")
+        end
+    elseif msg == "reloadui" then
+        -- Reload the UI
+        print("Bissy: Reloading UI...")
+        ReloadUI()
+    elseif msg == "debug" then
+        -- Dump database for debugging
+        DumpDatabase()
+    elseif msg == "checkslots" then
+        -- Check slot visibility
+        DebugCheckSlots()
+    elseif msg == "verifyslots" then
+        -- Verify and fix slot configuration
+        VerifySlotConfiguration()
+    else
+        print("Bissy: Available commands:")
+        print("  /bissy show - Show the Bissy frame")
+        print("  /bissy hide - Hide the Bissy frame")
+        print("  /bissy reset - Reset the position of the Bissy frame")
+        print("  /bissy primary - Switch to primary character set")
+        print("  /bissy secondary - Switch to secondary character set")
+        print("  /bissy import - Show the import dialog")
+        print("  /bissy reload - Reload the current set")
+        print("  /bissy reloadui - Reload the WoW UI")
+        print("  /bissy debug - Show debug information")
+        print("  /bissy checkslots - Check slot visibility")
+        print("  /bissy verifyslots - Verify and fix slot configuration")
+    end
+end
+
+-- Add slash command
+SLASH_BISSY1 = "/bissy"
+SlashCmdList["BISSY"] = function(msg, editBox)
+    HandleSlashCommand(msg)
+end
