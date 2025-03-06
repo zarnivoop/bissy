@@ -5,6 +5,5 @@
 ## Version: 1.0
 ## SavedVariables: BissyDB
 
-json.lua
 Bissy.lua
-Bissy.xml
+json.lua

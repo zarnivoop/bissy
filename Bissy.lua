@@ -1,21 +1,8 @@
 local addonName, addon = ...
 
 -- Initialize saved variables
-local db = BissyDB or {}
-BissyDB = db
-
--- Visibility state
-local isShown = false
-
--- Initialize character data
-db.primary = db.primary or {}
-db.secondary = db.secondary or {}
-db.currentSet = db.currentSet or "primary"  -- Initialize currentSet
-local currentSet = db.currentSet  -- Load the setting
-
--- Store item IDs for tooltip integration
-local primaryItems = {}
-local secondaryItems = {}
+local db
+local currentSet = "primary"
 
 -- Debug function - only output in debug mode
 local DEBUG_MODE = false
@@ -25,28 +12,33 @@ local function Debug(...)
     end
 end
 
+-- Create a wrapper for JSON parsing that will work regardless of when the JSON library is loaded
+local function ParseJSON(jsonStr)
+    -- Check if the JSON library is loaded
+    if _G.json and _G.json.parse then
+        local success, result = pcall(function() return _G.json.parse(jsonStr) end)
+        if success and result then
+            return result
+        else
+            print("Bissy: JSON parse error: " .. (result or "unknown error"))
+            return nil
+        end
+    else
+        print("Bissy: JSON library not available yet")
+        return nil
+    end
+end
+
 -- Create main frame
 local Bissy = CreateFrame("Frame", "Bissy", UIParent, "PortraitFrameTemplate")
 Bissy:Hide()
-Bissy:SetSize(430, 550)  -- Increased width to accommodate slots on both sides
+Bissy:SetSize(450, 500)  -- Reduced width from original
 Bissy:SetPoint("CENTER")
 Bissy:SetMovable(true)
 Bissy:EnableMouse(true)
 Bissy:RegisterForDrag("LeftButton")
 Bissy:SetScript("OnDragStart", Bissy.StartMoving)
-Bissy:SetScript("OnDragStop", function(self)
-    self:StopMovingOrSizing()
-    
-    -- Save position
-    local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint()
-    db.position = {
-        point = point,
-        relativeTo = relativeTo and relativeTo:GetName() or nil,
-        relativePoint = relativePoint,
-        x = xOfs,
-        y = yOfs
-    }
-end)
+Bissy:SetScript("OnDragStop", Bissy.StopMovingOrSizing)
 Bissy:SetClampedToScreen(true)
 Bissy:SetTitle("Bissy")
 
@@ -85,34 +77,37 @@ local SLOT_MAP = {
     RANGED = "RangedSlot",
     SHIRT = "ShirtSlot",
     TABARD = "TabardSlot",
+    AMULET = "NeckSlot", -- Added from import-example.json
+    RING_1 = "Finger0Slot", -- Added from import-example.json
+    RING_2 = "Finger1Slot", -- Added from import-example.json
 }
 
 -- Define all equipment slots with positions matching standard WoW character sheet
 local SLOT_INFO = {
     -- Left column
-    { name = "HeadSlot", x = 75, y = -76 },
-    { name = "NeckSlot", x = 75, y = -117 },
-    { name = "ShoulderSlot", x = 75, y = -158 },
-    { name = "BackSlot", x = 75, y = -199 },
-    { name = "ChestSlot", x = 75, y = -240 },
-    { name = "ShirtSlot", x = 75, y = -281 },
-    { name = "TabardSlot", x = 75, y = -322 },
-    { name = "WristSlot", x = 75, y = -363 },
+    { name = "HeadSlot", x = 65, y = -70 },
+    { name = "NeckSlot", x = 65, y = -110 },
+    { name = "ShoulderSlot", x = 65, y = -150 },
+    { name = "BackSlot", x = 65, y = -190 },
+    { name = "ChestSlot", x = 65, y = -230 },
+    { name = "ShirtSlot", x = 65, y = -270 },
+    { name = "TabardSlot", x = 65, y = -310 },
+    { name = "WristSlot", x = 65, y = -350 },
     
     -- Right column
-    { name = "HandsSlot", x = 340, y = -76 },
-    { name = "WaistSlot", x = 340, y = -117 },
-    { name = "LegsSlot", x = 340, y = -158 },
-    { name = "FeetSlot", x = 340, y = -199 },
-    { name = "Finger0Slot", x = 340, y = -240 },
-    { name = "Finger1Slot", x = 340, y = -281 },
-    { name = "Trinket0Slot", x = 340, y = -322 },
-    { name = "Trinket1Slot", x = 340, y = -363 },
+    { name = "HandsSlot", x = 330, y = -70 },
+    { name = "WaistSlot", x = 330, y = -110 },
+    { name = "LegsSlot", x = 330, y = -150 },
+    { name = "FeetSlot", x = 330, y = -190 },
+    { name = "Finger0Slot", x = 330, y = -230 },
+    { name = "Finger1Slot", x = 330, y = -270 },
+    { name = "Trinket0Slot", x = 330, y = -310 },
+    { name = "Trinket1Slot", x = 330, y = -350 },
     
     -- Weapons row (below model)
-    { name = "MainHandSlot", x = 150, y = -430 },
-    { name = "SecondaryHandSlot", x = 215, y = -430 },
-    { name = "RangedSlot", x = 280, y = -430 },
+    { name = "MainHandSlot", x = 150, y = -400 },
+    { name = "SecondaryHandSlot", x = 215, y = -400 },
+    { name = "RangedSlot", x = 280, y = -400 },
 }
 
 -- Create item slots
@@ -163,7 +158,7 @@ local ClearAllSlots
 local UpdateCharacterModel
 
 -- CENTRALIZED SET SWITCHING FUNCTION
-local function SwitchSet(setName)
+local function SwitchSet(setName, forceShow)
     -- Validate the set name
     if setName ~= "primary" and setName ~= "secondary" then
         print("Bissy: Invalid set name: " .. tostring(setName))
@@ -177,11 +172,11 @@ local function SwitchSet(setName)
     -- Update the frame title
     Bissy:SetTitle("Bissy (" .. (setName == "primary" and "Primary" or "Secondary") .. ")")
     
-    print("Switching to " .. setName .. " set")
+    -- print("Switching to " .. setName .. " set")
 
     -- Only proceed with UI updates if the frame is shown
-    if isShown then
-        print("Updating UI with switched set")
+    if Bissy:IsShown() or forceShow then
+        -- print("Updating UI with switched set")
         
         -- Clear all slots first
         ClearAllSlots()
@@ -191,7 +186,7 @@ local function SwitchSet(setName)
         
         -- Process each item if we have data
         if currentData and currentData.items and #currentData.items > 0 then
-            print("Displaying " .. #currentData.items .. " items for " .. setName .. " set")
+            -- print("Displaying " .. #currentData.items .. " items for " .. setName .. " set")
             
             -- Pre-load item data for all items
             for _, item in ipairs(currentData.items) do
@@ -250,14 +245,19 @@ local function SwitchSet(setName)
                             
                             -- Set border color based on item quality
                             if itemRarity then
-                                SetItemButtonQuality(slot, itemRarity, itemLink)
-                            end
-                            
-                            -- Store item ID for tooltip integration
-                            if setName == "primary" then
-                                primaryItems[slotName] = itemId
-                            else
-                                secondaryItems[slotName] = itemId
+                                -- Fix for item rarity coloring
+                                if C_Item and C_Item.GetItemQualityColor then
+                                    local r, g, b = C_Item.GetItemQualityColor(itemRarity)
+                                    slot.IconBorder:SetVertexColor(r, g, b)
+                                    slot.IconBorder:Show()
+                                else
+                                    -- Fallback for Classic
+                                    local qualityColor = ITEM_QUALITY_COLORS[itemRarity]
+                                    if qualityColor then
+                                        slot.IconBorder:SetVertexColor(qualityColor.r, qualityColor.g, qualityColor.b)
+                                        slot.IconBorder:Show()
+                                    end
+                                end
                             end
                         end
                     else
@@ -329,58 +329,79 @@ end
 
 -- Create character model
 local model = CreateFrame("DressUpModel", nil, Bissy)
-model:SetPoint("TOPLEFT", 130, -76)
-model:SetSize(170, 320)  -- Adjusted size to better match character sheet
+model:SetPoint("TOPLEFT", 130, -60)  -- Adjusted position
+model:SetSize(170, 320)
 model:SetUnit("player")
+model:SetAutoDress(false)  -- Don't auto-dress with player's gear
 Bissy.model = model  -- Store the model in the Bissy frame for easy access
 
--- Add equipment section titles
-local leftTitle = Bissy:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-leftTitle:SetPoint("TOPLEFT", 75, -50)
-leftTitle:SetText("Armor")
-
-local rightTitle = Bissy:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-rightTitle:SetPoint("TOPLEFT", 340, -50)
-rightTitle:SetText("Accessories")
-
--- Add weapons section title
-local weaponsTitle = Bissy:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-weaponsTitle:SetPoint("TOPLEFT", 190, -405)
-weaponsTitle:SetText("Weapons")
+-- Create item slots
+for i, info in ipairs(SLOT_INFO) do
+    if not slots[info.name] then
+        slots[info.name] = CreateItemSlot(info)
+    end
+end
 
 -- Function to update the character model with equipped items
 function UpdateCharacterModel()
-    -- Reset the model
+    Debug("Updating character model")
+    
+    -- Make sure the model exists
+    if not model then
+        Debug("Model frame doesn't exist yet")
+        return
+    end
+    
+    -- Reset the model completely
+    model:ClearModel()
+    model:SetUnit("player")
     model:Undress()
     
-    -- Try to dress the model with all equipped items
-    local itemCount = 0
-    for slotName, slot in pairs(slots) do
-        if slot.itemLink then
-            -- Try to extract item ID from item link
-            local itemID = slot.itemLink:match("item:(%d+)")
-            if itemID then
-                print("Bissy Debug: Trying on item ID: " .. itemID .. " for slot: " .. slotName)
-                model:TryOn(itemID)
-                itemCount = itemCount + 1
-            else
-                print("Bissy Debug: Trying on item link: " .. slot.itemLink .. " for slot: " .. slotName)
-                model:TryOn(slot.itemLink)
+    -- Get the current set data
+    local currentData = db[currentSet]
+    if not currentData or not currentData.items then
+        Debug("No items in current set to display on model")
+        return
+    end
+    
+    -- Add a slight delay to ensure the model is ready before trying on items
+    C_Timer.After(0.1, function()
+        -- Process each item for the model
+        local itemCount = 0
+        
+        for _, item in ipairs(currentData.items) do
+            local itemId = tonumber(item.id)
+            if itemId then
+                Debug("Trying on item ID: %s for slot: %s", itemId, item.slot)
+                
+                -- Use the item string format that works best with TryOn
+                local itemString = "item:" .. itemId .. ":0:0:0:0:0:0:0"
+                model:TryOn(itemString)
                 itemCount = itemCount + 1
             end
         end
-    end
-    
-    print("Bissy Debug: Updated character model with " .. itemCount .. " items")
-    
-    -- Force model to update
-    model:RefreshCamera()
-    model:SetModelScale(1.0)
+        
+        Debug("Updated character model with %d items", itemCount)
+        
+        -- Force model to update
+        model:RefreshCamera()
+        model:SetModelScale(1.0)
+        
+        -- Add another delay and refresh again to ensure all items are loaded
+        C_Timer.After(0.5, function()
+            Debug("Refreshing character model after delay")
+            if model then
+                -- Sometimes we need to reset the position after items are loaded
+                model:SetPosition(0, 0, 0)
+                model:RefreshCamera()
+            end
+        end)
+    end)
 end
 
 -- Function to clear all item slots
 function ClearAllSlots()
-    print("Bissy Debug: Clearing all slots")
+    Debug("Clearing all slots")
     for slotName, slot in pairs(slots) do
         slot.itemLink = nil
         
@@ -392,240 +413,135 @@ function ClearAllSlots()
     end
     
     -- Also reset the model
-    if Bissy.model then
-        Bissy.model:Undress()
-        Bissy.model:RefreshCamera()
-    end
+    model:ClearModel()
+    model:SetUnit("player")
+    model:Undress()
+    model:RefreshCamera()
 end
-
--- Function to check the visibility of all slots
-function DebugCheckSlots()
-    Debug("Checking visibility of all slots")
-    for slotName, slot in pairs(slots) do
-        Debug("Slot: %s", slotName)
-        Debug("  - Has itemLink: %s", (slot.itemLink and "Yes" or "No"))
-        Debug("  - Icon texture: %s", (slot.icon:GetTexture() and "Yes" or "No"))
-    end
-end
-
--- Store the original OnShow handler if it exists
-local originalOnShow = Bissy:GetScript("OnShow")
-
--- Set up the OnShow handler
-Bissy:SetScript("OnShow", function(self)
-    -- Call original OnShow if it exists
-    if originalOnShow then
-        originalOnShow(self)
-    end
-    
-    -- Use our centralized SwitchSet function to refresh the UI
-    -- This will handle loading items, updating the title, and button states
-    SwitchSet(currentSet)
-end)
 
 -- Import dialog
 function ShowImportDialog()
-    if not importDialog then
-        -- Create a very simple frame
-        local dialog = CreateFrame("Frame", "BissyImportDialog", UIParent)
-        dialog:SetSize(500, 300)
-        dialog:SetPoint("CENTER")
-        dialog:SetFrameStrata("DIALOG")
-        dialog:EnableMouse(true)
-        dialog:SetMovable(true)
-        dialog:RegisterForDrag("LeftButton")
-        dialog:SetScript("OnDragStart", dialog.StartMoving)
-        dialog:SetScript("OnDragStop", function(self)
-            self:StopMovingOrSizing()
-        end)
-        
-        -- Simple background
-        local bg = dialog:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0, 0, 0, 0.8)
-        
-        -- Simple border
-        local border = dialog:CreateTexture(nil, "BORDER")
-        border:SetPoint("TOPLEFT", -1, 1)
-        border:SetPoint("BOTTOMRIGHT", 1, -1)
-        border:SetColorTexture(0.5, 0.5, 0.5, 1)
-        
-        -- Title
-        dialog.title = dialog:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        dialog.title:SetPoint("TOP", 0, -10)
-        dialog.title:SetText("Import Character Sheet")
-        
-        -- Description
-        dialog.desc = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        dialog.desc:SetPoint("TOP", 0, -30)
-        dialog.desc:SetText("Paste your character sheet JSON data below:")
-        
-        -- Edit box
-        dialog.editBox = CreateFrame("EditBox", nil, dialog)
-        dialog.editBox:SetMultiLine(true)
-        dialog.editBox:SetFontObject(ChatFontNormal)
-        dialog.editBox:SetWidth(450)
-        dialog.editBox:SetHeight(150)
-        dialog.editBox:SetPoint("TOP", 0, -60)
-        dialog.editBox:SetScript("OnEscapePressed", function() dialog:Hide() end)
-        
-        -- Add a background to the edit box
-        local bg = dialog.editBox:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0, 0, 0, 0.5)
-        
-        -- Scroll frame for the edit box
-        local scrollFrame = CreateFrame("ScrollFrame", nil, dialog, "UIPanelScrollFrameTemplate")
-        scrollFrame:SetSize(450, 150)
-        scrollFrame:SetPoint("TOP", 0, -60)
-        scrollFrame:SetScrollChild(dialog.editBox)
-        
-        -- Test button (loads example JSON)
-        local testBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
-        testBtn:SetText("Load Example")
-        testBtn:SetSize(100, 22)
-        testBtn:SetPoint("BOTTOMRIGHT", -10, 10)
-        testBtn:SetScript("OnClick", function()
-            local exampleJson = [[
-{
-  "name": "Test Character",
-  "items": [
-    {"id": 18832, "name": "Brutality Blade", "slot": "MAIN_HAND"},
-    {"id": 18805, "name": "Core Hound Tooth", "slot": "OFF_HAND"},
-    {"id": 16866, "name": "Helm of Might", "slot": "HEAD"},
-    {"id": 16868, "name": "Pauldrons of Might", "slot": "SHOULDER"},
-    {"id": 16865, "name": "Breastplate of Might", "slot": "CHEST"},
-    {"id": 16861, "name": "Bracers of Might", "slot": "WRIST"},
-    {"id": 16863, "name": "Gauntlets of Might", "slot": "HAND"},
-    {"id": 16864, "name": "Belt of Might", "slot": "WAIST"},
-    {"id": 16867, "name": "Legplates of Might", "slot": "LEGS"},
-    {"id": 16862, "name": "Sabatons of Might", "slot": "FEET"},
-    {"id": 18404, "name": "Onyxia Blood Talisman", "slot": "NECK"},
-    {"id": 17063, "name": "Band of Accuria", "slot": "FINGER1"},
-    {"id": 19138, "name": "Band of Sulfuras", "slot": "FINGER2"},
-    {"id": 18814, "name": "Choker of the Fire Lord", "slot": "TRINKET1"},
-    {"id": 18806, "name": "Core Forged Greaves", "slot": "TRINKET2"},
-    {"id": 18541, "name": "Puissant Cape", "slot": "BACK"}
-  ]
-}
-]]
-            print("Bissy: Loading example JSON")
-            dialog.editBox:SetText(exampleJson)
-        end)
-        
-        -- Import button
-        local importBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
-        importBtn:SetText("Import")
-        importBtn:SetSize(100, 22)
-        importBtn:SetPoint("BOTTOMRIGHT", testBtn, "BOTTOMLEFT", -5, 0)
-        importBtn:SetScript("OnClick", function()
-            local jsonStr = dialog.editBox:GetText()
-            if not jsonStr or jsonStr == "" then
-                print("Bissy: No data to import")
-                return
-            end
-            
-            print("Bissy: Attempting to parse JSON data")
-            
-            -- Try to use the json.lua library if available
-            if json and json.decode then
-                local success, result = pcall(function() return json.decode(jsonStr) end)
-                if success and result and result.items then
-                    print("Bissy: Successfully parsed JSON with library")
-                    ProcessImportedData(result)
-                    dialog:Hide()
-                    return
-                end
-            end
-            
-            -- Fallback to manual parsing if json library failed or isn't available
-            local data = {
-                name = "Imported Character",
-                items = {}
-            }
-            
-            -- Extract character name if possible
-            local name = jsonStr:match('"name"%s*:%s*"([^"]+)"')
-            if name then
-                data.name = name
-                print("Bissy: Found character name: " .. name)
-            end
-            
-            -- Count of items found
-            local itemCount = 0
-            
-            -- Extract items with a simpler approach
-            local itemPattern = '{"id":%s*(%d+)%s*,%s*"name":%s*"([^"]+)"%s*,%s*"slot":%s*"([^"]+)"}'
-            for id, name, slot in string.gmatch(jsonStr, itemPattern) do
-                -- Check if the slot is valid
-                if SLOT_MAP[slot] then
-                    table.insert(data.items, {
-                        id = tonumber(id),
-                        name = name,
-                        slot = slot
-                    })
-                    itemCount = itemCount + 1
-                end
-            end
-            
-            -- If no items found with the first pattern, try a more flexible one
-            if #data.items == 0 then
-                for id, name, slot in string.gmatch(jsonStr, '"id"%s*:%s*(%d+).-"name"%s*:%s*"([^"]+)".-"slot"%s*:%s*"([^"]+)"') do
-                    -- Check if the slot is valid
-                    if SLOT_MAP[slot] then
-                        table.insert(data.items, {
-                            id = tonumber(id),
-                            name = name,
-                            slot = slot
-                        })
-                        itemCount = itemCount + 1
-                    end
-                end
-            end
-            
-            -- If still no items found, try a very direct approach
-            if #data.items == 0 then
-                -- Try to find the items section
-                local itemsSection = jsonStr:match('"items"%s*:%s*%[(.-)%]')
-                if itemsSection then
-                    -- Try a very simple pattern that just looks for IDs and slots
-                    for id, slot in string.gmatch(itemsSection, '"id"%s*:%s*(%d+).-"slot"%s*:%s*"([^"]+)"') do
-                        -- Check if the slot is valid
-                        if SLOT_MAP[slot] then
-                            table.insert(data.items, {
-                                id = tonumber(id),
-                                name = "Item " .. id,  -- Use a placeholder name
-                                slot = slot
-                            })
-                            itemCount = itemCount + 1
-                        end
-                    end
-                end
-            end
-            
-            -- Process the data
-            if #data.items > 0 then
-                print("Bissy: Found " .. itemCount .. " items in imported data")
-                ProcessImportedData(data)
-                dialog:Hide()
-            else
-                print("Bissy: No items found in JSON data. Please check format.")
-            end
-        end)
-        
-        -- Close button
-        local closeBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
-        closeBtn:SetText("Cancel")
-        closeBtn:SetSize(100, 22)
-        closeBtn:SetPoint("BOTTOMLEFT", 10, 10)
-        closeBtn:SetScript("OnClick", function()
-            dialog:Hide()
-        end)
-        
-        importDialog = dialog
-    end
+    -- Create a custom dialog frame without using DialogBoxFrame
+    local dialog = CreateFrame("Frame", "BissyImportDialog", UIParent, "BackdropTemplate")
+    dialog:SetSize(500, 400)
+    dialog:SetPoint("CENTER")
+    dialog:SetFrameStrata("DIALOG")
     
-    importDialog:Show()
+    -- Add background and border
+    dialog:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true,
+        tileSize = 32,
+        edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    })
+    
+    -- Add a title bar
+    local titleBG = dialog:CreateTexture(nil, "ARTWORK")
+    titleBG:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Header")
+    titleBG:SetWidth(300)
+    titleBG:SetHeight(64)
+    titleBG:SetPoint("TOP", 0, 12)
+    
+    -- Set the title
+    dialog.header = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    dialog.header:SetPoint("TOP", titleBG, "TOP", 0, -14)
+    dialog.header:SetText("Import Character Data")
+    
+    -- Add a close button
+    local closeBtn = CreateFrame("Button", nil, dialog, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", -5, -5)
+    
+    -- Add description text
+    local descText = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    descText:SetPoint("TOPLEFT", 20, -40)
+    descText:SetPoint("TOPRIGHT", -20, -40)
+    descText:SetText("Currently supported is character exports from SixtyUpgrades.com")
+    descText:SetJustifyH("LEFT")
+    
+    -- Create scrolling edit box for input
+    local scrollFrame = CreateFrame("ScrollFrame", nil, dialog, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 20, -65)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -40, 50)
+    
+    local editBox = CreateFrame("EditBox", nil, scrollFrame)
+    editBox:SetSize(scrollFrame:GetWidth() - 20, 1000) -- Height larger than needed for scrolling
+    editBox:SetMultiLine(true)
+    editBox:SetAutoFocus(true)
+    editBox:SetFontObject("ChatFontNormal")
+    editBox:SetScript("OnEscapePressed", function() dialog:Hide() end)
+    editBox:SetText("Paste your JSON data here...")
+    editBox:SetScript("OnEditFocusGained", function(self)
+        if self:GetText() == "Paste your JSON data here..." then
+            self:SetText("")
+        end
+    end)
+    
+    -- Add a background for the edit box
+    local editBg = scrollFrame:CreateTexture(nil, "BACKGROUND")
+    editBg:SetAllPoints()
+    editBg:SetColorTexture(0, 0, 0, 0.2)
+    
+    scrollFrame:SetScrollChild(editBox)
+    
+    -- Create import button
+    local importBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
+    importBtn:SetText("Import")
+    importBtn:SetSize(100, 22)
+    importBtn:SetPoint("BOTTOMRIGHT", -20, 15)
+    importBtn:SetScript("OnClick", function()
+        local jsonStr = editBox:GetText()
+        
+        if not jsonStr or jsonStr == "" or jsonStr == "Paste your JSON data here..." then
+            print("Bissy: No data to import")
+            return
+        end
+        
+        -- Try to use the json.lua library if available
+        local data = ParseJSON(jsonStr)
+        if data and data.items then
+            print("Bissy: Successfully parsed JSON")
+            ProcessImportedData(data)
+            dialog:Hide()
+            
+            -- Show the Bissy frame if it's not already shown
+            if not Bissy:IsShown() then
+                Bissy:Show()
+            end
+        else
+            print("Bissy: Failed to parse JSON data. Check your input.")
+        end
+    end)
+    
+    -- Create cancel button
+    local cancelBtn = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
+    cancelBtn:SetText("Cancel")
+    cancelBtn:SetSize(100, 22)
+    cancelBtn:SetPoint("RIGHT", importBtn, "LEFT", -10, 0)
+    cancelBtn:SetScript("OnClick", function()
+        dialog:Hide()
+    end)
+    
+    -- Make the dialog draggable
+    dialog:SetMovable(true)
+    dialog:EnableMouse(true)
+    dialog:RegisterForDrag("LeftButton")
+    dialog:SetScript("OnDragStart", dialog.StartMoving)
+    dialog:SetScript("OnDragStop", dialog.StopMovingOrSizing)
+    
+    -- Make the dialog modal (block input to other frames)
+    dialog:EnableKeyboard(true)
+    dialog:SetPropagateKeyboardInput(false)
+    dialog:SetScript("OnKeyDown", function(self, key)
+        if key == "ESCAPE" then
+            self:Hide()
+        end
+    end)
+    
+    -- Show the dialog
+    dialog:Show()
+    editBox:SetFocus()
 end
 
 -- Create button on character frame
@@ -634,12 +550,11 @@ openButton:SetText("Bissy")
 openButton:SetSize(80, 22)
 openButton:SetPoint("TOPRIGHT", CharacterFrame, "TOPRIGHT", -25, -25)
 openButton:SetScript("OnClick", function()
-    if isShown then
+    if Bissy:IsShown() then
         Bissy:Hide()
-        isShown = false
     else
         Bissy:Show()
-        isShown = true
+        SwitchSet(currentSet)
     end
 end)
 
@@ -673,28 +588,18 @@ end)
 
 -- Process imported data
 function ProcessImportedData(data)
-    print("Bissy Debug: Processing imported data")
-    
-    -- Validate data structure
-    if not data or type(data) ~= "table" then
-        print("Bissy Debug: Invalid data format - not a table")
+    -- Validate data
+    if not data or not data.items then
+        print("Bissy Debug: Invalid data format")
         return false
     end
-    
-    if not data.items or type(data.items) ~= "table" or #data.items == 0 then
-        print("Bissy Debug: Invalid data format - no items array or empty items array")
-        return false
-    end
-    
-    -- Debug: Print the imported data structure
-    print("Bissy Debug: Imported data structure:")
-    print("  Name: " .. (data.name or "Unknown"))
-    print("  Items: " .. #data.items)
     
     -- Validate each item
     for i, item in ipairs(data.items) do
-        if not item.id or not item.slot then
-            print("Bissy Debug: Invalid item at index " .. i .. " - missing id or slot")
+
+        -- Check if item has a slot
+        if not item.slot then
+            print("Bissy Debug: Item at index " .. i .. " has no slot")
             return false
         end
         
@@ -710,22 +615,22 @@ function ProcessImportedData(data)
     end
     
     -- Save to current set
-    local currentSetName = currentSet
-    print("Bissy Debug: Saving to current set: " .. currentSetName)
+    local targetSet = currentSet
+    print("Bissy Debug: Saving to set: " .. targetSet)
     
-    if currentSetName == "primary" then
+    if targetSet == "primary" then
         db.primary = data
-    elseif currentSetName == "secondary" then
+    elseif targetSet == "secondary" then
         db.secondary = data
     else
-        print("Bissy Debug: Invalid current set: " .. tostring(currentSetName))
+        print("Bissy Debug: Invalid target set: " .. tostring(targetSet))
         return false
     end
     
     -- Update the UI if the frame is shown
-    if isShown then
-        print("Bissy Debug: Updating UI with imported data")
-        SwitchSet(currentSetName)
+    if Bissy:IsShown() then
+        -- print("Bissy Debug: Updating UI with imported data")
+        SwitchSet(targetSet)
     end
     
     -- Dump database for debugging
@@ -804,11 +709,7 @@ SlashCmdList["BISSYDEBUG"] = function(msg)
     elseif msg == "checkslots" then
         DebugCheckSlots()
     elseif msg == "shown" then
-        if Bissy:IsVisible() then
-            print("Bissy Debug: Bissy is shown")
-        else
-            print("Bissy Debug: Bissy is not shown")
-        end
+        CheckVisibility()
     else
         print("Bissy Debug: Available commands:")
         print("  /bissydebug dump - Dump database contents")
@@ -821,38 +722,100 @@ SlashCmdList["BISSYDEBUG"] = function(msg)
     end
 end
 
+-- Function to check the visibility of all slots
+function DebugCheckSlots()
+    Debug("Checking visibility of all slots")
+    for slotName, slot in pairs(slots) do
+        Debug("Slot: %s", slotName)
+        Debug("  - Has itemLink: %s", (slot.itemLink and "Yes" or "No"))
+        Debug("  - Icon texture: %s", (slot.icon:GetTexture() and "Yes" or "No"))
+    end
+end
+
+-- Function to check and print frame visibility status
+local function CheckVisibility()
+    local isVisible = Bissy:IsVisible()
+    Debug("Bissy frame is currently %s", isVisible and "visible" or "hidden")
+    return isVisible
+end
+
+-- Store the original OnShow handler if it exists
+local originalOnShow = Bissy:GetScript("OnShow")
+
+-- Set up the OnShow handler
+Bissy:SetScript("OnShow", function(self)
+    -- Call original OnShow if it exists
+    if originalOnShow then
+        originalOnShow(self)
+    end
+    
+    -- Use our centralized SwitchSet function to refresh the UI
+    -- This will handle loading items, updating the title, and button states
+    SwitchSet(currentSet)
+end)
+
 -- Event handler
 local function OnEvent(self, event, ...)
-    if event == "ADDON_LOADED" and ... == addonName then
-        print("Bissy: Addon loaded")
+    if event == "ADDON_LOADED" then
+        if ... ~= addonName then return end
         
         -- Initialize the addon
-        db = BissyDB or {}
-        BissyDB = db
+        BissyDB = BissyDB or { currentSet = "primary", primary = {}, secondary = {} }
+        db = BissyDB
+        currentSet = db.currentSet or "primary"
         
-        -- Initialize character sets if they don't exist
-        db.primary = db.primary or {}
-        db.secondary = db.secondary or {}
-        
-        -- Set default character set
-        db.currentSet = db.currentSet or "primary"
-        currentSet = db.currentSet
-        
-        -- Initialize item arrays
-        primaryItems = {}
-        secondaryItems = {}
-        
-        -- Debug output
-        print("Bissy: Addon initialized")
-        print("Bissy: Current set is " .. currentSet)
+        print("Bissy: Addon loaded. Current set: " .. currentSet)
         
         -- Dump database for debugging
-        DumpDatabase()
+        -- DumpDatabase()
+        
+        -- Set up tooltip hook for showing Bissy info on regular game tooltips
+        GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
+            local name, link = tooltip:GetItem()
+            if not name or not link then return end
+            
+            local itemId = tonumber(string.match(link, "item:(%d+)"))
+            if not itemId then return end
+                        
+            -- Check primary set
+            local function checkSet(set, itemId)
+                if set and set.items then
+                    for _, item in ipairs(set.items) do
+                        if tonumber(item.id) == itemId then
+                            return true
+                        end
+                    end
+                end
+                return false
+            end
+
+            -- Check if this item is in our primary or secondary sets
+            local inPrimary = checkSet(db.primary, itemId)
+            local inSecondary = checkSet(db.secondary, itemId)
+
+            -- Add tooltip line if item is in either set
+            if inPrimary or inSecondary then
+                tooltip:AddLine(" ")
+                
+                if inPrimary then
+                    tooltip:AddDoubleLine("Bissy item", "Primary set", 0.9, 0.8, 0.5, 0.6, 1.0, 0.6)
+                end
+                
+                if inSecondary then
+                    tooltip:AddDoubleLine("Bissy item", "Secondary set", 0.9, 0.8, 0.5, 0.6, 1.0, 0.6)
+                end
+                
+                tooltip:Show()
+            end
+        end)
+        Debug("Tooltip hook set up")
         
         -- Set the current set using our new function (with a slight delay to ensure UI is ready)
         C_Timer.After(0.1, function()
             SwitchSet(db.currentSet)
         end)
+
+        self:UnregisterEvent("ADDON_LOADED")
     end
 end
 
@@ -868,8 +831,10 @@ function HandleSlashCommand(msg)
     
     if msg == "show" then
         Bissy:Show()
+        CheckVisibility()
     elseif msg == "hide" then
         Bissy:Hide()
+        CheckVisibility()
     elseif msg == "reset" then
         Bissy:ClearAllPoints()
         Bissy:SetPoint("CENTER", UIParent, "CENTER", 0, 0)

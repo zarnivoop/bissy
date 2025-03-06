@@ -60,11 +60,18 @@ local function kind_of(obj)
 end
 
 local function escape_str(s)
-  local in_char  = {'\\', '"', '/', '\b', '\f', '\n', '\r', '\t'}
-  local out_char = {'\\', '"', '/',  'b',  'f',  'n',  'r',  't'}
-  for i, c in ipairs(in_char) do
-    s = s:gsub(c, '\\' .. out_char[i])
-  end
+  -- Replace any backslashes with double backslashes first to avoid interference
+  s = s:gsub('\\', '\\\\')
+  
+  -- Handle special characters
+  s = s:gsub('"', '\\"')
+  s = s:gsub('/', '\\/')
+  s = s:gsub('\b', '\\b')
+  s = s:gsub('\f', '\\f')
+  s = s:gsub('\n', '\\n')
+  s = s:gsub('\r', '\\r')
+  s = s:gsub('\t', '\\t')
+  
   return s
 end
 
@@ -190,5 +197,11 @@ function json.parse(str, pos, end_delim)
     error('Invalid json syntax starting at ' .. pos_info_str)
   end
 end
+
+-- Add decode as an alias for parse
+json.decode = json.parse
+
+-- Make the json table available globally
+_G.json = json
 
 return json
