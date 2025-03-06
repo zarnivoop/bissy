@@ -4,6 +4,9 @@
 ## Author: Stefan
 ## Version: 1.0
 ## SavedVariables: BissyDB
+## X-Wago-ID: nKW1nYNE
+## X-License: MIT/X
+## X-Category: Inventory
 
 Bissy.lua
 json.lua
